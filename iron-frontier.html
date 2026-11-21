@@ -107,6 +107,8 @@ svg#map { width: 100%; height: 100%; display: block; touch-action: none; }
 .terr.stale { opacity: .6; }
 .coast-glow { fill: none; stroke: rgba(196,226,214,.22); stroke-width: 4.5; stroke-linejoin: round; pointer-events: none; }
 .coast { fill: none; stroke: rgba(30,24,12,.8); stroke-width: .8; pointer-events: none; }
+.cut { fill: none; stroke: rgba(28,22,12,.5); stroke-width: .5; stroke-dasharray: 2 1.5; pointer-events: none; }
+.lbl .occ { font-family: var(--font-data); font-weight: 600; font-size: 8px; fill: #ffe08a; paint-order: stroke; stroke: rgba(14,12,6,.9); stroke-width: 2.4px; }
 .fborder { fill: none; stroke: rgba(20,15,6,.9); stroke-width: 1.5; stroke-linejoin: round; pointer-events: none; }
 .front-glow { fill: none; stroke: rgba(255,72,40,.55); stroke-width: 5; stroke-linecap: round; stroke-linejoin: round; pointer-events: none; filter: blur(2px); }
 .front { fill: none; stroke: #ff6a3d; stroke-width: 1.8; stroke-dasharray: 5 3; stroke-linecap: round; pointer-events: none; animation: march 1.1s linear infinite; }
@@ -438,16 +440,51 @@ const H = 470, W = 960;
 // ---------- geography ----------
 const geoms = WORLD.objects.countries.geometries.filter(g => g.properties.name !== "Antarctica" && g.properties.name !== "Fr. S. Antarctic Lands");
 const obj = { type: "GeometryCollection", geometries: geoms };
-const features = topojson.feature(WORLD, obj).features;
-const nbrLand = topojson.neighbors(geoms);
-const projection = d3.geoNaturalEarth1().fitExtent([[6, 6], [W - 6, H - 6]], { type: "FeatureCollection", features });
+const countries = topojson.feature(WORLD, obj).features;
+const nbrC = topojson.neighbors(geoms);
+const projection = d3.geoNaturalEarth1().fitExtent([[6, 6], [W - 6, H - 6]], { type: "FeatureCollection", features: countries });
 const path = d3.geoPath(projection);
-const N = features.length;
 
-const T = features.map((f, i) => {
-  const name = f.properties.name;
+// Big countries are cut into provinces, so a war pushes a front across the land
+// instead of one battle handing over a whole continent. The cut is deterministic,
+// so every player in a network game gets the same map.
+const CAPITALS = {
+  "Russia": [37.6, 55.75], "Canada": [-75.7, 45.4], "United States of America": [-77, 38.9], "China": [116.4, 39.9],
+  "Brazil": [-47.9, -15.8], "Australia": [149.1, -35.3], "India": [77.2, 28.6], "Argentina": [-58.4, -34.6],
+  "Kazakhstan": [71.4, 51.2], "Algeria": [3.05, 36.75], "Dem. Rep. Congo": [15.3, -4.3], "Greenland": [-51.7, 64.2],
+  "Saudi Arabia": [46.7, 24.7], "Mexico": [-99.1, 19.4], "Indonesia": [106.8, -6.2], "Sudan": [32.5, 15.6],
+  "Libya": [13.2, 32.9], "Iran": [51.4, 35.7], "Mongolia": [106.9, 47.9], "Peru": [-77, -12.05], "Chad": [15, 12.1],
+  "Niger": [2.1, 13.5], "Angola": [13.2, -8.8], "Mali": [-8, 12.6], "South Africa": [28.2, -25.7], "Colombia": [-74.1, 4.7],
+  "Ethiopia": [38.7, 9], "Bolivia": [-68.1, -16.5], "Mauritania": [-15.97, 18.1], "Egypt": [31.2, 30], "Tanzania": [35.7, -6.2],
+  "Nigeria": [7.5, 9.06], "Venezuela": [-66.9, 10.5], "Namibia": [17.1, -22.6], "Mozambique": [32.6, -25.97],
+  "Pakistan": [73.05, 33.7], "Turkey": [32.85, 39.9], "Chile": [-70.65, -33.45], "Zambia": [28.3, -15.4], "Myanmar": [96.1, 19.75],
+  "Afghanistan": [69.2, 34.5], "Somalia": [45.3, 2.05], "Central African Rep.": [18.55, 4.4], "S. Sudan": [31.6, 4.85],
+  "Ukraine": [30.5, 50.45], "Madagascar": [47.5, -18.9], "Botswana": [25.9, -24.65], "Kenya": [36.8, -1.3], "France": [2.35, 48.85],
+};
+// well-known regions of the largest countries; each province takes the nearest unused one
+const AREAS = {
+  "Russia": [["볼가", 48, 53], ["북카프카스", 44, 44], ["우랄", 60, 58], ["북극해 연안", 52, 66], ["서시베리아", 75, 60], ["알타이", 85, 52], ["중시베리아", 95, 62],
+    ["타이미르", 95, 72], ["바이칼", 108, 54], ["야쿠티아", 125, 64], ["극동", 135, 48], ["마가단", 150, 62], ["추코트카", 172, 66], ["캄차카", 160, 56]],
+  "United States of America": [["뉴잉글랜드", -71, 43], ["남동부", -84, 33], ["플로리다", -82, 28], ["중서부", -89, 42], ["대평원", -99, 41], ["텍사스", -99, 31],
+    ["남서부", -111, 34], ["로키산맥", -108, 43], ["캘리포니아", -120, 37], ["북서부", -120, 46], ["알래스카", -150, 63], ["알래스카 북부", -155, 69], ["하와이", -157, 20.5]],
+  "Canada": [["퀘벡", -72, 50], ["대서양 연안", -63, 47], ["래브라도", -61, 54], ["온타리오 북부", -86, 50], ["매니토바", -97, 55], ["서스캐처원", -106, 54],
+    ["앨버타", -114, 54], ["브리티시컬럼비아", -124, 53], ["유콘", -136, 63], ["노스웨스트 준주", -118, 64], ["누나부트", -95, 66], ["북극 제도", -95, 76], ["배핀섬", -72, 68]],
+  "China": [["만주", 126, 46], ["산둥", 118, 36], ["화동", 119, 30], ["화남", 113, 23], ["화중", 112, 29], ["쓰촨", 104, 30], ["윈난", 101, 25], ["티베트", 88, 31],
+    ["칭하이", 96, 35], ["신장", 85, 41], ["준가르", 87, 46], ["내몽골", 112, 43], ["간쑤", 100, 39], ["산시", 109, 36]],
+  "Brazil": [["아마조나스", -64, -4], ["파라", -52, -4], ["북동부", -39, -7], ["바이아", -41, -12], ["미나스제라이스", -44, -18], ["상파울루", -48, -22], ["남부", -52, -28],
+    ["마투그로수", -56, -13], ["론도니아", -63, -10], ["호라이마", -61, 2], ["토칸칭스", -48, -10], ["마라냥", -45, -5]],
+  "Australia": [["빅토리아", 144, -37], ["남오스트레일리아", 136, -30], ["퀸즐랜드", 146, -23], ["퀸즐랜드 북부", 144, -16], ["노던 준주", 133, -20], ["톱엔드", 133, -13],
+    ["서오스트레일리아", 121, -27], ["필바라", 119, -21], ["킴벌리", 126, -17], ["퍼스 일대", 117, -31], ["태즈메이니아", 146.5, -42], ["뉴사우스웨일스 내륙", 146, -32]],
+  "India": [["남인도", 78, 12], ["데칸", 77, 18], ["마하라슈트라", 75, 19], ["벵골", 87, 23], ["라자스탄", 73, 26], ["구자라트", 71.5, 22.5], ["중부", 79, 23], ["북동부", 93, 26], ["카슈미르", 76, 34]],
+};
+const DIRS = ["동부", "북동부", "북부", "북서부", "서부", "남서부", "남부", "남동부"];
+const provCount = km2 => km2 < 600000 ? 1 : Math.min(12, Math.round(km2 / 900000) + 1);
+const holdOf = km2 => km2 < 250000 ? 1 : km2 < 800000 ? 2 : 3;   // wins needed to take a region
+const C = [], T = [];
+const d2 = (a, b) => (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2;
+countries.forEach((f, c) => {
+  const name = f.properties.name, ko = KO[name] || name;
   const km2 = d3.geoArea(f) * 6371 * 6371;
-  const value = km2 < 150000 ? 1 : km2 < 2000000 ? 2 : 3;
   // label at centroid of largest projected polygon
   let lp = path.centroid(f);
   if (f.geometry.type === "MultiPolygon") {
@@ -458,11 +495,140 @@ const T = features.map((f, i) => {
     }
   }
   const geoC = projection.invert(lp) || d3.geoCentroid(f);
-  return { i, name, ko: KO[name] || name, value, km2, lp, geoC, area: path.area(f), nb: new Set(nbrLand[i]), sea: new Set() };
+  const cc = { c, name, ko, f, km2, value: km2 < 150000 ? 1 : km2 < 2000000 ? 2 : 3, provs: [], cut: null };
+  C.push(cc);
+  const k = provCount(km2);
+  if (k > 1 && splitCountry(cc, k, CAPITALS[name] || geoC)) return;
+  cc.provs.push(T.length);
+  T.push({ i: T.length, c, name, ko, cap: true, value: cc.value, km2, hold: holdOf(km2), lp, geoC, area: path.area(f) });
 });
-const byName = new Map(T.map(t => [t.name, t.i]));
+function splitCountry(cc, k, capLL) {
+  // work on a local flat sheet (x = lon·cos(lat0), y = lat); unwrap the date line so Chukotka sits beside Russia
+  const f = cc.f, c0 = d3.geoCentroid(f), cl = Math.cos(c0[1] * Math.PI / 180);
+  const fwd = ([x, y]) => { let d = x - c0[0]; if (d > 180) d -= 360; if (d < -180) d += 360; return [d * cl, y]; };
+  const back = ([x, y]) => [x / cl + c0[0], Math.max(-89, Math.min(89, y))];
+  const polys = (f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates).map(p => p.map(r => r.map(fwd)));
+  const inside = q => polys.some(p => d3.polygonContains(p[0], q) && !p.slice(1).some(h => d3.polygonContains(h, q)));
+  const all = polys.flatMap(p => p[0]);
+  const [x0, x1] = d3.extent(all, p => p[0]), [y0, y1] = d3.extent(all, p => p[1]);
+  // an even sample of the land, each point weighted by its true area
+  const step = Math.sqrt((x1 - x0) * (y1 - y0) / 4000), pts = [];
+  for (let x = x0 + step / 2; x < x1; x += step) for (let y = y0 + step / 2; y < y1; y += step) if (inside([x, y])) pts.push([x, y, Math.cos(y * Math.PI / 180)]);
+  if (pts.length < k * 8) return false;
+  // seeds: the capital first, then spread out and relaxed into regions of similar size (k-means)
+  const capP = fwd(capLL);
+  let seeds = [capP];
+  while (seeds.length < k) seeds.push(pts[d3.maxIndex(pts, p => d3.min(seeds, s => d2(p, s)))]);
+  for (let it = 0; it < 16; it++) {
+    const acc = seeds.map(() => [0, 0, 0]);
+    for (const p of pts) { const a = acc[d3.minIndex(seeds, s => d2(p, s))]; a[0] += p[0] * p[2]; a[1] += p[1] * p[2]; a[2] += p[2]; }
+    seeds = seeds.map((s, j) => j > 0 && acc[j][2] ? [acc[j][0] / acc[j][2], acc[j][1] / acc[j][2]] : [s[0], s[1]]);
+  }
+  let del, groups;
+  for (;;) {
+    del = d3.Delaunay.from(seeds);
+    groups = seeds.map(() => []);
+    for (const p of pts) groups[del.find(p[0], p[1])].push(p);
+    if (groups.every(g => g.length)) break;
+    seeds = seeds.filter((_, j) => groups[j].length);
+  }
+  if (seeds.length < 2) return false;
+  const vor = del.voronoi([x0 - 5, y0 - 5, x1 + 5, y1 + 5]);
+  const tot = d3.sum(pts, p => p[2]), first = T.length, capJ = del.find(capP[0], capP[1]);
+  const dens = ring => ring.flatMap((p, j) => {
+    if (j === ring.length - 1) return [p];
+    const q = ring[j + 1], n = Math.ceil(Math.sqrt(d2(p, q)) / 0.5);
+    return d3.range(n).map(s => [p[0] + (q[0] - p[0]) * s / n, p[1] + (q[1] - p[1]) * s / n]);
+  });
+  seeds.forEach((s, j) => {
+    const g = groups[j], w = d3.sum(g, p => p[2]), share = w / tot;
+    const m = [d3.sum(g, p => p[0] * p[2]) / w, d3.sum(g, p => p[1] * p[2]) / w];
+    const geoC = back(g[d3.minIndex(g, p => d2(p, m))]);   // label on land, near the middle
+    let ring = dens(vor.cellPolygon(j)).map(back);
+    if (d3.geoArea({ type: "Polygon", coordinates: [ring] }) > 2 * Math.PI) ring = ring.reverse();
+    const km2 = cc.km2 * share;
+    cc.provs.push(first + j);
+    T.push({ i: first + j, c: cc.c, name: cc.name, ko: cc.ko, cap: j === capJ, value: j === capJ ? cc.value : 1, km2, hold: holdOf(km2),
+      lp: projection(geoC), geoC, area: path.area(f) * share, cell: { type: "Polygon", coordinates: [ring] }, m });
+  });
+  // names: the capital region keeps the country's name; the rest take a known region name,
+  // or else their direction from the middle of the country
+  const rest = cc.provs.filter(i => i !== first + capJ), named = new Set();
+  const areas = (AREAS[cc.name] || []).map(([n, x, y]) => [n, fwd([x, y])]), used = new Set();
+  const pairs = rest.flatMap(i => areas.map(([n, q]) => [d2(T[i].m, q), i, n])).sort((a, b) => a[0] - b[0]);
+  for (const [, i, n] of pairs) if (!named.has(i) && !used.has(n)) { T[i].ko = `${cc.ko} ${n}`; named.add(i); used.add(n); }
+  const mid = [d3.sum(pts, p => p[0] * p[2]) / tot, d3.sum(pts, p => p[1] * p[2]) / tot];
+  const far = d3.max(rest, i => Math.sqrt(d2(T[i].m, mid))) || 1, taken = new Map();
+  for (const i of rest.filter(i => !named.has(i)).sort((a, b) => d2(T[a].m, mid) - d2(T[b].m, mid))) {
+    const t = T[i], a = Math.atan2(t.m[1] - mid[1], t.m[0] - mid[0]);
+    const dir = Math.sqrt(d2(t.m, mid)) < 0.3 * far ? "중부" : DIRS[(Math.round(a / (Math.PI / 4)) + 8) % 8];
+    const n = (taken.get(dir) || 0) + 1; taken.set(dir, n);
+    t.ko = `${cc.ko} ${dir}${n === 1 ? "" : n === 2 ? " 외곽" : " " + n}`;
+  }
+  cc.cut = { fwd, back, del, first, inside, seeds };
+  return true;
+}
+const N = T.length;
+for (const t of T) { t.nb = new Set(); t.land = new Set(); t.sea = new Set(); }
+// which region of country c holds a point (lon, lat)
+const provAt = (c, p) => { const cc = C[c]; if (!cc.cut) return cc.provs[0]; const q = cc.cut.fwd(p); return cc.cut.first + cc.cut.del.find(q[0], q[1]); };
+const capOf = c => C[c].provs.find(i => T[i].cap);
+const byName = new Map(C.map(cc => [cc.name, capOf(cc.c)]));
+const cByName = new Map(C.map(cc => [cc.name, cc.c]));
+// borders: every stretch of shared border, kept per pair of regions for the faction borders and fronts
+const BSEG = new Map(), cutLines = [];
+const pkeyT = (a, b) => a < b ? `${a}-${b}` : `${b}-${a}`;
+function landLink(a, b, line) {
+  if (a === b) return;
+  T[a].nb.add(b); T[b].nb.add(a); T[a].land.add(b); T[b].land.add(a);
+  if (line) { const k = pkeyT(a, b); if (!BSEG.has(k)) BSEG.set(k, [Math.min(a, b), Math.max(a, b), []]); BSEG.get(k)[2].push(line); }
+}
+(function borders() {
+  // between countries: shared border segments have identical coordinates on both sides
+  const rnd = p => `${p[0].toFixed(4)},${p[1].toFixed(4)}`, segs = new Map();
+  countries.forEach((f, c) => {
+    const polys = f.geometry.type === "Polygon" ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys) for (const ring of poly) for (let j = 0; j < ring.length - 1; j++) {
+      const a = rnd(ring[j]), b = rnd(ring[j + 1]), k = a < b ? a + "|" + b : b + "|" + a;
+      if (!segs.has(k)) segs.set(k, []);
+      segs.get(k).push([c, ring[j], ring[j + 1]]);
+    }
+  });
+  for (const list of segs.values()) {
+    if (list.length < 2 || list[0][0] === list[1][0]) continue;
+    const [c1, p, q] = list[0], c2 = list[1][0], mid = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2];
+    landLink(provAt(c1, mid), provAt(c2, mid), [p, q]);
+  }
+  // countries that touch only at a point
+  nbrC.forEach((ns, c) => ns.forEach(o => { if (!C[c].provs.some(i => C[o].provs.some(j => T[i].land.has(j)))) { const [, a, b] = closest(c, o); landLink(a, b); } }));
+  // inside a country: neighbouring Voronoi cells, along the part of their edge that is on land
+  for (const cc of C) {
+    if (!cc.cut) continue;
+    const { del, first, inside, back } = cc.cut, n = cc.provs.length, vv = del.voronoi([-1e4, -1e4, 1e4, 1e4]), polys = cc.provs.map((_, j) => vv.cellPolygon(j).slice(0, -1));
+    for (let a = 0; a < n; a++) for (const b of del.neighbors(a)) {
+      if (b <= a) continue;
+      const shared = polys[a].filter(p => polys[b].some(q => d2(p, q) < 1e-9));
+      if (shared.length < 2) continue;
+      const [p, q] = shared, runs = [];
+      let cur = null;
+      for (let s = 0; s <= 80; s++) {
+        const x = [p[0] + (q[0] - p[0]) * s / 80, p[1] + (q[1] - p[1]) * s / 80];
+        if (inside(x)) { if (!cur) runs.push(cur = []); cur.push(back(x)); } else cur = null;
+      }
+      const lines = runs.filter(r => r.length > 1);
+      if (lines.length) { lines.forEach(l => { landLink(first + a, first + b, l); cutLines.push(l); }); }
+      else link(first + a, first + b);   // islands of one country: joined by sea
+    }
+  }
+})();
+function closest(ca, cb) {
+  let best = [Infinity, -1, -1];
+  for (const a of C[ca].provs) for (const b of C[cb].provs) { const d = d3.geoDistance(T[a].geoC, T[b].geoC); if (d < best[0]) best = [d, a, b]; }
+  return best;
+}
 function link(a, b) { if (a === b || T[a].nb.has(b)) return; T[a].nb.add(b); T[b].nb.add(a); T[a].sea.add(b); T[b].sea.add(a); }
-for (const [a, b] of SEA_LANES) if (byName.has(a) && byName.has(b)) link(byName.get(a), byName.get(b));
+const linkC = (a, b) => { if (!cByName.has(a) || !cByName.has(b)) return null; const [, x, y] = closest(cByName.get(a), cByName.get(b)); return [x, y]; };
+for (const [a, b] of SEA_LANES) { const p = linkC(a, b); if (p) link(p[0], p[1]); }
 const dist = (a, b) => d3.geoDistance(T[a].geoC, T[b].geoC);
 for (const t of T) if (t.nb.size === 0) {
   const near = T.filter(o => o.i !== t.i).sort((x, y) => dist(t.i, x.i) - dist(t.i, y.i)).slice(0, 2);
@@ -491,14 +657,14 @@ const STRAITS = [["Australia","Indonesia"],["Australia","Timor-Leste"],["United 
   ["Yemen","Somaliland"],["Egypt","Saudi Arabia"],["Iran","United Arab Emirates"],["Cuba","Mexico"],["Jamaica","Cuba"],["Haiti","Cuba"],
   ["Bahamas","United States of America"],["Puerto Rico","Dominican Rep."],["Trinidad and Tobago","Venezuela"],["New Zealand","Australia"],
   ["New Caledonia","Australia"],["Vanuatu","Solomon Is."],["Solomon Is.","Papua New Guinea"],["Fiji","Vanuatu"],
-  ["Japan","Taiwan"]].map(([a, b]) => [byName.get(a), byName.get(b)]);
+  ["Japan","Taiwan"]].map(([a, b]) => linkC(a, b) || []);
 for (const t of T) t.nbA = new Set();
-for (const t of T) for (const o of nbrLand[t.i]) if (dist(t.i, o) < 0.9) t.nbA.add(o);
+for (const t of T) for (const o of t.land) if (dist(t.i, o) < 0.9) t.nbA.add(o);
 for (const [a, b] of STRAITS) if (a !== undefined && b !== undefined) { T[a].nbA.add(b); T[b].nbA.add(a); }
 for (const t of T) for (const o of t.sea) if (dist(t.i, o) < 0.3) t.nbA.add(o);
 // the paleolithic adds the Bering land bridge
 for (const t of T) t.nbP = new Set(t.nbA);
-{ const ru = byName.get("Russia"), us = byName.get("United States of America"); T[ru].nbP.add(us); T[us].nbP.add(ru); }
+{ const [ru, us] = linkC("Russia", "United States of America"); T[ru].nbP.add(us); T[us].nbP.add(ru); }
 
 // ---------- state ----------
 let S = null;
@@ -538,20 +704,25 @@ const ownerName = id => id < 0 ? neutralName() : fac(id).name;
 const SPEEDS_OK = v => ["x2", "day", "slow"].includes(v) ? v : null;
 function newGame() {
   stopClock(); netLeave();
-  S = { v: 3, phase: "scenario", net: null, mode: (S && S.mode === "rt") ? "rt" : "turn", speed: (S && SPEEDS_OK(S.speed)) || "day", diff: (S && DIFFS[S.diff]) ? S.diff : "easy", paused: false, scenario: null, era: null, grace: 3, turn: 0, player: -1, pool: 0, owners: new Array(N).fill(-1), troops: T.map(t => t.value * 2 + 2), acted: new Array(N).fill(false), factions: [], log: [], over: null };
+  S = { v: 4, phase: "scenario", net: null, mode: (S && S.mode === "rt") ? "rt" : "turn", speed: (S && SPEEDS_OK(S.speed)) || "day", diff: (S && DIFFS[S.diff]) ? S.diff : "easy", paused: false, scenario: null, era: null, grace: 3, turn: 0, player: -1, pool: 0, owners: new Array(N).fill(-1), troops: T.map(t => t.value * 2 + 2), acted: new Array(N).fill(false), factions: [], log: [], over: null };
   ui.sel = -1;
   addLog("세계 각국이 동원령을 선포했습니다. 시나리오를 고르세요.");
   render(); persist(); showScenarios();
 }
 
+// a modern state starts with its whole country: the capital holds the army, the provinces a token garrison
+function claimCountry(h, id) {
+  for (const p of C[T[h].c].provs) { S.owners[p] = id; S.troops[p] = p === h ? START_TROOPS : 1; }
+}
 function startAs(i) {
   S.factions = [];
+  i = capOf(T[i].c);
   const homes = POWERS.map(([n, c]) => [byName.get(n), c]).filter(([h]) => h !== undefined);
   if (!homes.some(([h]) => h === i)) homes.push([i, PLAYER_COLOR]);
   homes.forEach(([h, color]) => {
     const id = S.factions.length;
     S.factions.push({ id, home: h, name: tn(h), color, isPlayer: h === i, alive: true });
-    S.owners[h] = id; S.troops[h] = START_TROOPS;
+    claimCountry(h, id);
     if (h === i) S.player = id;
   });
   begin();
@@ -617,13 +788,13 @@ function setupScenario(id) {
     POWERS.forEach(([n, color], k) => {
       const h = byName.get(n);
       S.factions.push({ id: k, home: h, name: tn(h), color, isPlayer: false, alive: true });
-      S.owners[h] = k; S.troops[h] = START_TROOPS;
+      claimCountry(h, k);
     });
   } else {
     const gs = groups(id), budget = id === "blocs" ? 60 : 70;
     S.grace = id === "blocs" ? 3 : 1;
     gs.forEach((g, k) => {
-      const home = g.members.slice().sort((a, b) => T[b].value - T[a].value || T[b].km2 - T[a].km2)[0];
+      const home = g.members.slice().sort((a, b) => T[b].cap - T[a].cap || C[T[b].c].value - C[T[a].c].value || C[T[b].c].km2 - C[T[a].c].km2)[0];
       S.factions.push({ id: k, home, name: g.name, color: g.color, isPlayer: false, alive: true });
       const vsum = d3.sum(g.members, i => T[i].value);
       let left = budget;
@@ -652,7 +823,7 @@ const SCENARIOS = [
   { id: "continents", name: "대륙 전쟁", level: "어려움", desc: "일곱 대륙이 각각 하나의 세력이 되어 시작부터 서로 맞붙습니다. 중립국이 없고, 모든 대륙이 같은 총병력 70개 사단을 받습니다." },
 ];
 function groups(id) {
-  if (id === "blocs") return BLOCS.map(b => ({ ...b, members: b.members.map(n => byName.get(n)).filter(i => i !== undefined) }));
+  if (id === "blocs") return BLOCS.map(b => ({ ...b, members: b.members.flatMap(n => cByName.has(n) ? C[cByName.get(n)].provs : []) }));
   return CONTINENTS.map((c, k) => ({ name: c.name, color: c.color, members: T.filter(t => continentOf(t) === k).map(t => t.i) }));
 }
 function startGroups(id, pick) {
@@ -698,7 +869,7 @@ function chooseScenario(id) {
   if (id === "powers") { S.phase = "pick"; hideOverlay(); render(); persist(); return; }
   const gs = groups(id), box = document.getElementById("overlayBox");
   box.innerHTML = `<h2>${SCENARIOS.find(x => x.id === id).name}</h2><p>지휘할 세력을 고르세요.</p>
-    <div class="scen">${gs.map((g, k) => `<button type="button" class="scenbtn" data-k="${k}"><b>${flagHTML({ id: k, name: g.name, color: g.color }, 26)}${g.name}</b><em>${g.members.length}개국</em><span>${g.members.slice(0, 6).map(i => tn(i)).join(", ")}${g.members.length > 6 ? " 외" : ""}</span></button>`).join("")}</div>
+    <div class="scen">${gs.map((g, k) => `<button type="button" class="scenbtn" data-k="${k}"><b>${flagHTML({ id: k, name: g.name, color: g.color }, 26)}${g.name}</b><em>${g.members.filter(i => T[i].cap).length}개국</em><span>${g.members.filter(i => T[i].cap).slice(0, 6).map(i => tn(i)).join(", ")}${g.members.filter(i => T[i].cap).length > 6 ? " 외" : ""}</span></button>`).join("")}</div>
     <div style="margin-top:12px"><button type="button" id="backScen">← 시나리오 다시 고르기</button></div>`;
   box.querySelectorAll(".scenbtn").forEach(b => b.onclick = () => startGroups(id, +b.dataset.k));
   document.getElementById("backScen").onclick = showScenarios;
@@ -769,7 +940,7 @@ const wpnMul = fid => 1 + 0.2 * ((S.wpn && S.wpn[fid]) || 0);
 const mktLabel = op => { const [a, b] = MARKET[op]; const [ka, va] = Object.entries(a)[0], [kb, vb] = Object.entries(b)[0]; return `${resName(ka)} ${va} → ${resName(kb)} ${vb}`; };
 const dealName = t => ({ peace: fl().peace, trade: fl().trade, merge: fl().merge, surr: "항복 요구" }[t]);
 // every region has one specialty resource
-for (const t of T) t.spec = "fmg"[[...t.name].reduce((a, c) => a + c.charCodeAt(0), 0) % 3];
+for (const t of T) t.spec = "fmg"[[...t.ko].reduce((a, c) => a + c.charCodeAt(0), 0) % 3];
 const TF = () => (S && S.mode === "rt" ? 5 : 1);   // real-time days per strategic "turn" for timers
 const pkey = (a, b) => a < b ? `${a}-${b}` : `${b}-${a}`;
 const atPeace = (a, b) => a >= 0 && b >= 0 && a !== b && S.peace && S.peace[pkey(a, b)] !== undefined;
@@ -799,13 +970,13 @@ const gain = (fid, c) => { for (const [k, v] of Object.entries(c)) S.res[fid][k]
 const power = fid => d3.sum(owned(fid), i => S.troops[i]);
 const borders = (a, b) => owned(a).some(i => [...NB(i)].some(j => owner(j) === b));
 function initEcon() {
-  S.v = 3;
+  S.v = 4;
   S.bld = T.map(() => [0, 0, 0, 0]);
   S.res = S.factions.map(() => ({ f: 12, m: 12, g: 12 }));
   S.wpn = S.factions.map(() => 0);
   S.tech = S.factions.map(() => (S.era ? 0 : 3)); S.known = new Array(N).fill(false);
   S.peace = {}; S.trade = {}; S.rep = S.factions.map(() => 100); S.offers = []; S.offerCd = {}; S.offerN = 0;
-  S.intAcc = S.factions.map(() => 0); S.combo = {}; S.march = []; S.marchN = 0;
+  S.intAcc = S.factions.map(() => 0); S.combo = {}; S.march = []; S.marchN = 0; S.occ = {};
 }
 function troopInc(fid) { return Math.max(2, Math.round(income(fid) * 0.6 * (humanF(fid) ? 1 : dif().aiInc))); }
 function production(fid) {
@@ -1095,11 +1266,30 @@ function resolveAttack(att, src, tgt, a) {
   S.combo[att] = r.win ? { n: comboOf(att) + 1, t: S.turn } : null;
   r.combo = r.win ? S.combo[att].n : 0;
   if (mine && r.combo >= 2) comboFx(tgt, r.combo);
+  if (!S.occ) S.occ = {};
   if (r.win) {
+    // a wide region falls step by step: each win takes part of it until the gauge is full
+    const oc = S.occ[tgt], hold = T[tgt].hold, prog = (oc && oc.f === att ? oc.p : 0) + (a >= 6 * d ? hold : a >= 3 * d ? 2 : 1);
+    if (prog < hold) {
+      S.occ[tgt] = { f: att, p: prog, t: S.turn };
+      S.troops[tgt] = Math.max(1, Math.round(d * 0.4));   // the defenders fall back and regroup
+      // the attackers dig in on the line they took and cannot strike again from there this turn
+      if (owner(src) === att) { S.troops[src] += r.left; if (S.mode !== "rt") S.acted[src] = true; }
+      r.partial = true; r.prog = prog; r.hold = hold; arrows[arrows.length - 1].part = `${prog}/${hold}`;
+      if (mine || vsMe || seenT(tgt)) addLog(`${who}, ${where} 진입 · 점령 ${prog}/${hold} (${a} 대 ${d})`, mine ? "me" : vsMe ? "bad" : "");
+      return r;
+    }
+    delete S.occ[tgt];
     S.owners[tgt] = att; S.troops[tgt] = r.left; S.acted[tgt] = true;
     if (S.bld && S.bld[tgt][2] > 0) S.bld[tgt][2]--;   // walls are damaged in the assault
     const capital = def >= 0 && fac(def).home === tgt;
     if (mine || vsMe || seenT(tgt)) addLog(`${who}, ${where} 점령${capital ? " · 수도 함락" : ""} (${a} 대 ${d})`, mine ? "me" : vsMe ? "bad" : "");
+    // losing a capital shakes everyone: the whole army if it was the faction's seat, else the rest of that country
+    if (def >= 0 && (capital || T[tgt].cap)) {
+      const hit = capital ? owned(def) : C[T[tgt].c].provs.filter(i => owner(i) === def), cut = capital ? 0.15 : 0.2;
+      for (const i of hit) S.troops[i] = Math.max(1, Math.round(S.troops[i] * (1 - cut)));
+      if (hit.length && (mine || vsMe || seenT(tgt))) addLog(capital ? `${fac(def).name} 전군 사기 저하 · 병력 -15%` : `${C[T[tgt].c].ko}의 남은 지방이 동요합니다 · 병력 -20%`, vsMe ? "bad" : mine ? "me" : "");
+    }
     if (def >= 0 && owned(def).length === 0) { fac(def).alive = false; addLog(`${fac(def).name} 세력이 소멸했습니다.`, fac(def).isPlayer ? "bad" : ""); }
   } else {
     S.troops[tgt] = r.defLeft;
@@ -1167,6 +1357,11 @@ function endTurn() {
   for (const f of S.factions) if (!f.isPlayer && !f.human && f.alive) aiTurn(f);
   // neutral garrisons slowly recover
   for (let i = 0; i < N; i++) if (S.owners[i] < 0 && S.troops[i] < wildCap(i) && Math.random() < 0.3) S.troops[i]++;
+  // an occupation that is not pressed fades: the owner wins back one step every few days
+  for (const [k, oc] of Object.entries(S.occ || {})) {
+    if (owner(+k) === oc.f || !fac(oc.f).alive) { delete S.occ[k]; continue; }
+    if (S.turn - oc.t >= 3 * TF()) { oc.p--; oc.t = S.turn; if (oc.p <= 0) delete S.occ[k]; }
+  }
   S.acted.fill(false);
   S.turn++; ui.tickAt = performance.now();
   econTurn();
@@ -1259,7 +1454,7 @@ function onClick(i) {
     else {
       const r = attack(s, i, ui.pct);
       // a partial sortie keeps the origin selected so the rest can strike again
-      ui.sel = r.win && ui.pct >= 1 ? i : s;
+      ui.sel = r.win && !r.partial && ui.pct >= 1 ? i : s;
       checkEnd();
     }
     render(); persist(); broadcast(); return;
@@ -1328,11 +1523,27 @@ const sphereP = root.append("path").datum({ type: "Sphere" }).attr("class", "glo
 const grat = root.append("path").datum(d3.geoGraticule10()).attr("fill", "none").attr("stroke", "#c8e1d7").attr("stroke-opacity", .13).attr("stroke-width", .5);
 const coastMesh = topojson.mesh(WORLD, obj, (a, b) => a === b);
 const coastGlow = root.append("path").datum(coastMesh).attr("class", "coast-glow");
+// a province is its country's shape seen through its own cell, so coasts stay exact
+const provClip = defs.selectAll("clipPath.pc").data(T.filter(t => t.cell)).join("clipPath").attr("class", "pc").attr("id", t => "pc" + t.i).append("path");
 const terr = root.append("g").selectAll("path").data(T).join("path")
-  .attr("class", "terr")
+  .attr("class", "terr").attr("clip-path", t => t.cell ? `url(#pc${t.i})` : null)
   .on("click", (e, t) => { tip.hidden = true; onClick(t.i); })
   .on("mousemove", (e, t) => showTip(e, t.i))
   .on("mouseleave", () => { ui.hover = -1; tip.hidden = true; });
+// regions being taken: stripes in the attacker's colour, thicker as the gauge fills
+const occG = root.append("g").attr("pointer-events", "none");
+const occPat = {};
+function occPattern(fid) {
+  const col = fac(fid).isPlayer ? PLAYER_COLOR : fac(fid).color, key = `${fid}-${col}`;
+  if (!occPat[key]) {
+    const id = `occ${Object.keys(occPat).length}`, p = defs.append("pattern").attr("id", id).attr("patternUnits", "userSpaceOnUse").attr("width", 6).attr("height", 6).attr("patternTransform", "rotate(-45)");
+    p.append("rect").attr("width", 3).attr("height", 6).attr("fill", col);
+    occPat[key] = id;
+  }
+  return `url(#${occPat[key]})`;
+}
+const cutMesh = { type: "MultiLineString", coordinates: cutLines };
+const cutP = root.append("path").datum(cutMesh).attr("class", "cut");
 const coastP = root.append("path").datum(coastMesh).attr("class", "coast");
 const borderG = root.append("g");
 const fbP = borderG.append("path").attr("class", "fborder");
@@ -1360,6 +1571,7 @@ cnt.append("rect").attr("y", 0).attr("height", 9).attr("rx", 1); cnt.append("tex
 lbl.append("text").attr("class", "nm");
 lbl.append("text").attr("class", "l2");
 lbl.append("text").attr("class", "l3");
+lbl.append("text").attr("class", "occ").attr("y", -19);
 const marchG = root.append("g").attr("class", "marches").attr("pointer-events", "none");
 const fxG = root.append("g").attr("class", "fx");
 // compass rose on the map table
@@ -1391,17 +1603,17 @@ const zoom = d3.zoom().scaleExtent([1, 10]).clickDistance(5).on("zoom", e => {
 svg.call(zoom).on("dblclick.zoom", null);
 function turnTo(i) { if (i === undefined || i < 0) return; rot = [-T[i].geoC[0], -Math.max(-60, Math.min(60, T[i].geoC[1])), 0]; redraw(); }
 // faction borders and fronts (borders between enemies) are rebuilt only when the map changes
-const gIdx = new Map(geoms.map((g, k) => [g, k]));
+const BPAIRS = [...BSEG.values()];
 let borderSig = "", fbMesh = null, frMesh = null;
 function computeBorders() {
   const sig = S.owners.join(",") + "|" + (S.peace ? Object.keys(S.peace).join(",") : "") + "|" + (ui.vis ? ui.vis.size + ":" + (S.known || []).filter(Boolean).length : "all");
   if (sig === borderSig) return;
   borderSig = sig;
   const live = !["scenario", "lobby"].includes(S.phase);
-  fbMesh = topojson.mesh(WORLD, obj, (a, b) => { if (a === b) return false; const i = gIdx.get(a), j = gIdx.get(b); return S.owners[i] !== S.owners[j] && knownT(i) && knownT(j); });
-  frMesh = live ? topojson.mesh(WORLD, obj, (a, b) => {
-    if (a === b) return false;
-    const i = gIdx.get(a), j = gIdx.get(b), x = S.owners[i], y = S.owners[j];
+  const mesh = keep => ({ type: "MultiLineString", coordinates: BPAIRS.filter(([i, j]) => keep(i, j)).flatMap(p => p[2]) });
+  fbMesh = mesh((i, j) => S.owners[i] !== S.owners[j] && knownT(i) && knownT(j));
+  frMesh = live ? mesh((i, j) => {
+    const x = S.owners[i], y = S.owners[j];
     return x >= 0 && y >= 0 && x !== y && !atPeace(x, y) && seenT(i) && seenT(j);
   }) : null;
 }
@@ -1410,7 +1622,11 @@ function redraw() {
   sphereP.attr("d", gpath); grat.attr("d", gpath); shadeP.attr("d", gpath); grainP.attr("d", gpath);
   atmo.attr("cx", W / 2).attr("cy", H / 2).attr("r", R0 * K * 1.09);
   coastGlow.attr("d", gpath); coastP.attr("d", gpath);
-  terr.attr("d", t => gpath(features[t.i]));
+  const cd = C.map(cc => gpath(cc.f));
+  terr.attr("d", t => cd[t.c]);
+  provClip.attr("d", t => gpath(t.cell));
+  occG.selectAll("path").attr("d", t => cd[t.c]);
+  cutP.attr("d", gpath);
   fbP.attr("d", fbMesh ? gpath(fbMesh) : null);
   const fr = frMesh ? gpath(frMesh) : null; frP.attr("d", fr); frGlow.attr("d", fr);
   sea.attr("d", ([a, b]) => gpath({ type: "LineString", coordinates: [T[a].geoC, T[b].geoC] }));
@@ -1424,7 +1640,7 @@ function placeLabels() {
   lbl.attr("display", t => {
     if (!knownT(t.i) || d3.geoDistance(t.geoC, c) > 1.45) return "none";
     const near = ui.sel >= 0 && NB(ui.sel).has(t.i);
-    return (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near || homes.has(t.i) || (K >= 2 && isPlayer(t.i))) ? null : "none";
+    return (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near || homes.has(t.i) || (S.occ && S.occ[t.i]) || (K >= 2 && isPlayer(t.i))) ? null : "none";
   }).attr("transform", t => `translate(${gproj(t.geoC)})`).classed("neu", t => owner(t.i) < 0);
   // the closer you zoom, the more you see: names, then specialty resource, then buildings
   const fs = Math.min(11, 6.5 + K * 0.45), fn = Math.min(12.5, 7.5 + K * 0.65);
@@ -1436,6 +1652,7 @@ function placeLabels() {
   lbl.select(".l2").attr("font-size", fs).attr("y", t => below(t) + fs * .6);
   lbl.select(".l3").attr("font-size", fs).attr("y", t => below(t) + fs * 1.75);
   lbl.select(".l2").text(t => K >= 2.5 && seenT(t.i) ? resName(T[t.i].spec) : "");
+  lbl.select(".occ").text(t => { const oc = S.occ && S.occ[t.i]; return oc && seenT(t.i) ? `점령 ${oc.p}/${T[t.i].hold}` : ""; });
   lbl.select(".l3").text(t => K >= 3.5 && seenT(t.i) && S.bld ? BLD.map((b, k) => lvl(t.i, k) ? `${bName(k)}${lvl(t.i, k)}` : "").filter(Boolean).join("·") : "");
 }
 
@@ -1452,6 +1669,9 @@ function render() {
     .classed("tgt-own", t => launch && NB(s).has(t.i) && isPlayer(t.i));
   sea.classed("hot", ([a, b]) => a === s || b === s).attr("display", ([a, b]) => NB(a).has(b) ? null : "none");
   terr.classed("stale", t => !!ui.vis && knownT(t.i) && !seenT(t.i)).classed("fog", t => !knownT(t.i));
+  const occL = Object.entries(S.occ || {}).map(([k, oc]) => ({ i: +k, c: T[+k].c, cell: T[+k].cell, oc })).filter(o => knownT(o.i) && fac(o.oc.f));
+  occG.selectAll("path").data(occL, o => o.i).join("path").attr("clip-path", o => o.cell ? `url(#pc${o.i})` : null)
+    .attr("fill", o => occPattern(o.oc.f)).attr("opacity", o => 0.3 + 0.55 * o.oc.p / T[o.i].hold);
   const homes = new Set(S.factions.map(f => f.home));
   const readyOn = S.phase === "ops" && S.mode !== "rt";
   tok.attr("transform", t => `scale(${tokScale(t.i)})`)
@@ -1532,6 +1752,7 @@ function showRules() {
   <p><b style="color:var(--signal)">난이도 · 지금 ${dif().name}</b> · ${dif().desc} 수도는 언제나 방어력 +50%라 쉽게 무너지지 않습니다.${dif().hGrace ? ` 처음 ${(S.grace ?? 3) + dif().hGrace}${S.mode === "rt" ? "0일" : "턴"} 동안은 컴퓨터가 사람의 땅을 공격하지 않습니다.` : ""}</p>
   <p><b style="color:var(--signal)">전투</b> · 병력이 많을수록 유리하고, 수비 쪽이 25% 유리합니다. 적 위에 마우스를 올리면 예상 승률이 나옵니다. 이번 턴에 도착한 부대는 다시 움직일 수 없습니다.</p>
   <p><b style="color:var(--signal)">공평한 출발</b> · 어느 세력을 골라도 시작 병력은 똑같습니다. 증원은 영토가 늘수록 늘지만 점점 덜 늘어나서, 큰 제국도 무적이 되지는 않습니다. 시작 후 몇 턴 동안은 세력끼리 서로 공격하지 않고 빈 땅만 차지합니다.</p>
+  <p><b style="color:var(--signal)">지방과 점령도</b> · 큰 나라는 여러 지방으로 나뉘어 한 곳씩 차지해야 합니다. 넓은 지방은 2~3번 이겨야 넘어오고, 이길 때마다 점령도가 오르며 지도에 공격한 쪽 색의 빗금이 짙어집니다(병력이 3배 이상이면 2칸, 6배 이상이면 한 번에). 점령 중인 공격군은 출발지로 돌아가 그 턴에는 다시 출격하지 못하니, 여러 방향에서 함께 치면 빨리 무너집니다. 공세를 멈추면 점령도는 조금씩 줄어듭니다. 수도를 잃으면 전군 병력이 15% 줄고, 나라의 중심 지방을 잃으면 그 나라의 남은 지방 병력이 20% 줄어듭니다.</p>
   <p><b style="color:var(--signal)">바다</b> · 점선은 해상 항로입니다. 바다 건너 나라도 항로로 연결되면 공격할 수 있습니다.</p>
   <button type="button" class="primary" id="closeRules">알겠습니다</button>`;
   document.getElementById("overlay").hidden = false;
@@ -1655,7 +1876,8 @@ function drawArrows() {
     any = true; if (isBig) big = a;
     fx({ k: "atk", src: a.src, tgt: a.tgt, color: a.color, big: isBig, delay, dur: isBig ? 1500 : 1100 });
     fx({ k: "boom", at: T[a.tgt].geoC, big: isBig, delay: delay + (isBig ? 430 : 330), dur: isBig ? 1150 : 800 });
-    if (a.win) fx({ k: "flag", fid: a.att, at: T[a.tgt].geoC, txt: isBig ? "점령" : "", delay: delay + 620, dur: 1500 });
+    if (a.win && a.part) { if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: `진입 ${a.part}`, color: "#ffe08a", delay: delay + 640, dur: 1400 }); }
+    else if (a.win) fx({ k: "flag", fid: a.att, at: T[a.tgt].geoC, txt: isBig ? "점령" : "", delay: delay + 620, dur: 1500 });
     else if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: "격퇴", color: "#ffb4a2", delay: delay + 640, dur: 1300 });
   }
   // captures that arrive without an arrow (network guests, merges, surrenders)
@@ -1729,7 +1951,7 @@ function showReport(a) {
   if (!el.hidden && !el.classList.contains("out") && !a.mine) return;
   const A = fac(a.att), D = a.def >= 0 ? fac(a.def) : null;
   const ok = a.mine ? a.win : !a.win;
-  const label = a.mine ? (a.win ? "점령 성공" : "공세 실패") : (a.win ? "방어 실패" : "방어 성공");
+  const label = a.part ? (a.mine ? `진입 · 점령 ${a.part}` : `방어선 후퇴 · ${a.part}`) : a.mine ? (a.win ? "점령 성공" : "공세 실패") : (a.win ? "방어 실패" : "방어 성공");
   const side = (f, n, name) => `<div class="rp-s">${f ? flagHTML(f, 32) : neutralFlag(32)}<b>${name}</b><span>${n}${unit()}</span></div>`;
   const tot = Math.max(1, a.a + a.d);
   el.innerHTML = `<div class="rp-h">전투 보고 · ${tn(a.tgt)}</div>
@@ -1870,6 +2092,8 @@ function terrRows(i) {
     <span>주둔 병력</span><b>${seenT(i) ? S.troops[i] + unit() : "? (지금은 보이지 않음)"}</b>
     <span>영토 가치</span><b>${"★".repeat(T[i].value)}</b>
     <span>면적</span><b>${Math.round(T[i].km2).toLocaleString("ko-KR")} km²</b>
+    <span>점령에 필요한 승리</span><b>${T[i].hold}번</b>
+    ${S.occ && S.occ[i] && fac(S.occ[i].f) ? `<span>점령 진행</span><b>${fac(S.occ[i].f).name} ${S.occ[i].p}/${T[i].hold}</b>` : ""}
     <span>인접 지역</span><b>${NB(i).size}곳${T[i].sea.size ? ` (해상 ${T[i].sea.size})` : ""}</b>
     <span>특산 자원</span><b>${resName(T[i].spec)}</b>
     ${S.bld && S.bld[i].some(x => x) ? `<span>시설</span><b>${BLD.map((b, k) => lvl(i, k) ? `${bName(k)} ${lvl(i, k)}` : "").filter(Boolean).join(" · ")}</b>` : ""}
@@ -1887,7 +2111,7 @@ function renderSel() {
     const power = POWERS.some(([n]) => n === T[i].name);
     el.innerHTML = `<div class="name">${tn(i)}</div>${terrRows(i)}
       <div class="hint">${power ? "열강 국가입니다. 표준 난이도." : "<strong>약소국</strong>으로 시작합니다. 고난도."}</div>
-      <div style="margin-top:10px"><button type="button" class="primary" id="startBtn">${tn(i)}(으)로 작전 개시</button></div>`;
+      <div style="margin-top:10px"><button type="button" class="primary" id="startBtn">${C[T[i].c].ko}(으)로 작전 개시</button></div>`;
     document.getElementById("startBtn").onclick = () => startAs(i);
     return;
   }
@@ -2019,6 +2243,8 @@ function showTip(e, i) {
   const o = owner(i);
   if (!knownT(i)) { tip.innerHTML = `<h4>미지의 땅</h4><div class="row"><span>탐험 지식을 높이면 보입니다</span></div>`; tip.hidden = false; posTip(e); return; }
   let html = `<h4>${tn(i)}</h4><div class="row"><span>${o < 0 ? neutralFlag(16) : flagHTML(fac(o), 16)}${ownerName(o)}</span><b>${seenT(i) ? S.troops[i] + unit() : "?"}</b></div>`;
+  const oc = S.occ && S.occ[i];
+  if (T[i].hold > 1) html += `<div class="row"><span>점령도</span><b>${oc && fac(oc.f) ? `${fac(oc.f).name} ${oc.p}/${T[i].hold}` : `0/${T[i].hold}`}</b></div>`;
   const s = ui.sel;
   if (S.phase !== "pick" && s >= 0 && isPlayer(s) && !isPlayer(i) && NB(s).has(i) && canLaunch(s) && canAttack(s, i)) {
     const n = sendN(s, ui.pct), p = odds(atkStr(owner(s), i, n), S.troops[i], defMul(i));
@@ -2186,7 +2412,8 @@ function packState() {
   return { sc: S.scenario, t: S.turn, o: S.owners, r: S.troops, a: S.acted.map(x => x ? 1 : 0).join(""),
     al: S.factions.map(f => f.alive ? 1 : 0).join(""), seats: NET.seats, p: S.paused ? 1 : 0, sp: S.speed,
     ov: S.over ? S.over.w : -1, lg: S.log.slice(-4).map(l => ({ i: l.i, t: l.t, m: l.m })),
-    mr: marches().map(m => [m.id, m.f, m.s, m.t, m.n, m.d0, m.d1, m.k === "mv" ? 1 : 0]) };
+    mr: marches().map(m => [m.id, m.f, m.s, m.t, m.n, m.d0, m.d1, m.k === "mv" ? 1 : 0]),
+    oc: Object.entries(S.occ || {}).map(([k, o]) => [+k, o.f, o.p, o.t]) };
 }
 function packEcon() {
   return { b: S.bld.map(x => x.join("")).join(""), rs: S.res.map(x => [x.f, x.m, x.g]), pc: S.peace, tr: S.trade, rp: S.rep, wp: S.wpn, tc: S.tech, of: S.offers.slice(-12) };
@@ -2224,6 +2451,8 @@ function applyState(d) {
   const had = new Set(marches().map(m => m.id));
   S.march = (Array.isArray(d.mr) ? d.mr : []).filter(a => Array.isArray(a) && Number.isInteger(a[0]) && okI(a[1], S.factions.length) && okI(a[2], N) && okI(a[3], N))
     .map(a => ({ id: a[0], f: a[1], s: a[2], t: a[3], n: Math.max(1, Math.min(99999, a[4] | 0)), d0: a[5] | 0, d1: a[6] | 0, k: a[7] ? "mv" : "atk" }));
+  S.occ = {};
+  for (const a of Array.isArray(d.oc) ? d.oc : []) if (Array.isArray(a) && okI(a[0], N) && okI(a[1], S.factions.length)) S.occ[a[0]] = { f: a[1], p: Math.max(1, Math.min(T[a[0]].hold, a[2] | 0)), t: a[3] | 0 };
   if (ui.marchSync) for (const m of S.march) if (!had.has(m.id)) warnMarch(m);
   ui.marchSync = true;
   const seen = new Set(S.log.map(l => l.i));
@@ -2266,7 +2495,7 @@ function persist() { if (S && S.net) return; try { localStorage.setItem(KEY, JSO
 function restore(data) {
   let saved = data && data.S;
   if (!saved) { try { saved = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (_) { saved = null; } }
-  if (saved && (saved.net || saved.v !== 3)) saved = null;
+  if (saved && (saved.net || saved.v !== 4)) saved = null;
   if (saved && saved.owners && saved.owners.length === N) { S = saved; render(); if (S.phase === "scenario") showScenarios(); startClock(); if (S.over) showEnd(S.over === "win", "지난 전쟁은 이미 끝났습니다."); }
   else newGame();
 }
