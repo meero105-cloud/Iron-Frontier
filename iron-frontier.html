@@ -116,6 +116,18 @@ svg#map { width: 100%; height: 100%; display: block; touch-action: none; }
 .grainlay { mix-blend-mode: multiply; opacity: .55; }
 .sea { fill: none; stroke: #b9dbe0; stroke-width: .7; stroke-dasharray: 1.5 3.5; stroke-linecap: round; opacity: .5; pointer-events: none; }
 .sea.hot { stroke: var(--signal); opacity: 1; stroke-width: 1.2; }
+.reach { pointer-events: none; }
+.reach.atk { fill: rgba(255,70,40,.3); }
+.reach.mv { fill: rgba(140,230,100,.26); }
+.reach.no { fill: rgba(160,160,160,.18); }
+.route { fill: none; stroke-linecap: round; pointer-events: none; }
+.route.atk { stroke: #ff5a44; stroke-width: 2.2; marker-end: url(#arAtk); }
+.route.mv { stroke: #9be06e; stroke-width: 2; marker-end: url(#arMv); }
+.route.no { stroke: #9a9a8a; stroke-width: 1.3; stroke-dasharray: 3 3; opacity: .7; }
+.route.sea { stroke-dasharray: 5 3; }
+.route.idle { opacity: .45; }
+.rtag { font-family: var(--font-body); font-weight: 700; font-size: 9px; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: rgba(14,12,6,.9); stroke-width: 2.6px; pointer-events: none; }
+.rtag.atk { fill: #ff8a70; } .rtag.mv { fill: #b9f08e; } .rtag.no { fill: #c9c9b8; }
 .lbl { pointer-events: none; }
 .lbl text { font-family: var(--font-data); font-weight: 600; text-anchor: middle; dominant-baseline: central; pointer-events: none; }
 .lbl .nm { font-family: var(--font-display); font-weight: 400; fill: #f6eed6; paint-order: stroke; stroke: rgba(14,12,6,.88); stroke-width: 2.6px; letter-spacing: .03em; }
@@ -565,7 +577,7 @@ function splitCountry(cc, k, capLL) {
     const n = (taken.get(dir) || 0) + 1; taken.set(dir, n);
     t.ko = `${cc.ko} ${dir}${n === 1 ? "" : n === 2 ? " 외곽" : " " + n}`;
   }
-  cc.cut = { fwd, back, del, first, inside, seeds };
+  cc.cut = { fwd, back, del, first, inside, seeds, groups, box: [x0 - 5, y0 - 5, x1 + 5, y1 + 5], step };
   return true;
 }
 const N = T.length;
@@ -604,20 +616,21 @@ function landLink(a, b, line) {
   // inside a country: neighbouring Voronoi cells, along the part of their edge that is on land
   for (const cc of C) {
     if (!cc.cut) continue;
-    const { del, first, inside, back } = cc.cut, n = cc.provs.length, vv = del.voronoi([-1e4, -1e4, 1e4, 1e4]), polys = cc.provs.map((_, j) => vv.cellPolygon(j).slice(0, -1));
+    const { del, first, inside, back, groups, box, step } = cc.cut, n = cc.provs.length, vv = del.voronoi(box), polys = cc.provs.map((_, j) => vv.cellPolygon(j).slice(0, -1));
     for (let a = 0; a < n; a++) for (const b of del.neighbors(a)) {
       if (b <= a) continue;
       const shared = polys[a].filter(p => polys[b].some(q => d2(p, q) < 1e-9));
       if (shared.length < 2) continue;
-      const [p, q] = shared, runs = [];
+      const [p, q] = shared, runs = [], ns = Math.max(80, Math.ceil(Math.sqrt(d2(p, q)) / 0.05));
       let cur = null;
-      for (let s = 0; s <= 80; s++) {
-        const x = [p[0] + (q[0] - p[0]) * s / 80, p[1] + (q[1] - p[1]) * s / 80];
+      for (let s = 0; s <= ns; s++) {
+        const x = [p[0] + (q[0] - p[0]) * s / ns, p[1] + (q[1] - p[1]) * s / ns];
         if (inside(x)) { if (!cur) runs.push(cur = []); cur.push(back(x)); } else cur = null;
       }
       const lines = runs.filter(r => r.length > 1);
       if (lines.length) { lines.forEach(l => { landLink(first + a, first + b, l); cutLines.push(l); }); }
-      else link(first + a, first + b);   // islands of one country: joined by sea
+      // islands of one country: joined by sea, but only across a short stretch of water, never across a neighbour's land
+      else if (d3.min(groups[a], u => d3.min(groups[b], v => d2(u, v))) < (Math.max(3, step * 4)) ** 2) link(first + a, first + b);
     }
   }
 })();
@@ -712,7 +725,7 @@ function newGame() {
 
 // a modern state starts with its whole country: the capital holds the army, the provinces a token garrison
 function claimCountry(h, id) {
-  for (const p of C[T[h].c].provs) { S.owners[p] = id; S.troops[p] = p === h ? START_TROOPS : 1; }
+  for (const p of C[T[h].c].provs) { S.owners[p] = id; S.troops[p] = p === h ? START_TROOPS : 4; }
 }
 function startAs(i) {
   S.factions = [];
@@ -1216,7 +1229,10 @@ const comboMul = fid => 1 + comboPct(fid) / 100;
 const atkStr = (att, tgt, a) => a * wpnMul(att) * comboMul(att) / (owner(tgt) >= 0 ? wpnMul(owner(tgt)) : 1);
 // ---- marching: in real time armies take days to cross the map, so everyone can see them coming ----
 const marches = () => S.march || (S.march = []);
-const travelDays = (s, t) => Math.max(1, Math.min(6, Math.round(dist(s, t) / 0.1))) + (T[s].sea.has(t) ? 1 : 0);
+const travelDays = (s, t) => S.mode === "rt" ? Math.max(1, Math.min(6, Math.round(dist(s, t) / 0.1))) + (T[s].sea.has(t) ? 1 : 0) : travelTurns(s, t);
+// turn-based: one turn per 1,200 km of road (up to 3), one more to cross open water; a one-turn trip happens at once
+const travelTurns = (s, t) => { const km = dist(s, t) * 6371, sea = T[s].sea.has(t) && !T[s].land.has(t); return Math.min(4, Math.min(3, Math.max(1, Math.ceil(km / 1200))) + (sea && km > 600 ? 1 : 0)); };
+const dUnit = () => S.mode === "rt" ? "일" : "턴";
 const incoming = (i, notF) => marches().filter(m => m.t === i && m.f !== notF);
 function launch(src, tgt, n, k) {
   const f = owner(src), days = travelDays(src, tgt);
@@ -1224,13 +1240,13 @@ function launch(src, tgt, n, k) {
   S.marchN = (S.marchN || 0) + 1;
   const m = { id: S.marchN, f, s: src, t: tgt, n, d0: S.turn, d1: S.turn + days, k };
   marches().push(m);
-  if (fac(f).isPlayer) addLog(`${tn(src)} → ${tn(tgt)} ${n}${unit()} ${k === "atk" ? "진격" : "이동"} 출발 · ${days}일 후 도착`, "me");
+  if (fac(f).isPlayer) addLog(`${tn(src)} → ${tn(tgt)} ${n}${unit()} ${k === "atk" ? "진격" : "이동"} 출발 · ${days}${dUnit()} 후 도착`, "me");
   else warnMarch(m);
   return m;
 }
 function warnMarch(m) {
   if (S.player < 0 || m.f === S.player || owner(m.t) !== S.player || !(seenT(m.s) || seenT(m.t))) return;
-  const msg = `${fac(m.f).name} ${m.n}${unit()}, ${tn(m.t)}(으)로 진군 중 · ${m.d1 - S.turn}일 후 도착`;
+  const msg = `${fac(m.f).name} ${m.n}${unit()}, ${tn(m.t)}(으)로 진군 중 · ${m.d1 - S.turn}${dUnit()} 후 도착`;
   addLog(msg, "bad"); toast("⚠ " + msg, "lose");
 }
 // armies whose day has come arrive: join friends, turn back from a new peace, or fight whoever holds the place now
@@ -1252,6 +1268,7 @@ const arrows = [];
 function attack(src, tgt, pct = 1) {
   const a = sendN(src, pct);
   if (S.mode === "rt") return { march: launch(src, tgt, a, "atk") };
+  if (travelTurns(src, tgt) > 1) { S.acted[src] = true; return { march: launch(src, tgt, a, "atk") }; }
   S.troops[src] -= a;
   return resolveAttack(owner(src), src, tgt, a);
 }
@@ -1300,7 +1317,8 @@ function resolveAttack(att, src, tgt, a) {
 function move(src, tgt, pct = 1) {
   const n = sendN(src, pct);
   if (S.mode === "rt") { launch(src, tgt, n, "mv"); return n; }
-  S.troops[tgt] += n; S.troops[src] -= n; S.acted[tgt] = true;
+  if (travelTurns(src, tgt) > 1) { S.acted[src] = true; launch(src, tgt, n, "mv"); return n; }
+  S.troops[tgt] += n; S.troops[src] -= n; S.acted[src] = true;   // each region sends once a turn; the troops that arrive can go on
   return n;
 }
 
@@ -1353,7 +1371,7 @@ function endTurn() {
   if (S.pool > 0) rt ? rtDeploy() : autoDeploy();
   if (!rt) ui.sel = -1;
   S.acted.fill(false);
-  if (rt) marchTick();
+  marchTick();   // armies on a long road arrive (turn-based too)
   for (const f of S.factions) if (!f.isPlayer && !f.human && f.alive) aiTurn(f);
   // neutral garrisons slowly recover
   for (let i = 0; i < N; i++) if (S.owners[i] < 0 && S.troops[i] < wildCap(i) && Math.random() < 0.3) S.troops[i]++;
@@ -1444,15 +1462,21 @@ function onClick(i) {
   if (s >= 0 && isPlayer(s) && s !== i && NB(s).has(i) && canLaunch(s) && !isPlayer(i) && !canAttack(s, i)) {
     toast(`${fac(owner(i)).name}와(과)는 ${fl().peace} 관계입니다. 외교 탭에서 ${fl().war}해야 공격할 수 있습니다.`, "lose"); return;
   }
+  if (s >= 0 && isPlayer(s) && s !== i && NB(s).has(i) && !canLaunch(s) && S.phase === "ops" && S.mode !== "rt") {
+    toast(S.acted[s] ? `${tn(s)}은(는) 이번 턴에 이미 병력을 보냈습니다. 지역마다 한 턴에 한 번 출격·이동할 수 있습니다.` : `${tn(s)}에는 병력이 1뿐이라 보낼 수 없습니다. 배치 단계에서 병력을 더하세요.`, "lose");
+    ui.sel = i; render(); return;
+  }
   if (s >= 0 && isPlayer(s) && s !== i && NB(s).has(i) && canLaunch(s)) {
     if (S.phase === "deploy") S.phase = "ops";
     if (S.mode === "rt") {
       // real time: the army marches off; the origin stays selected so more can follow
       isPlayer(i) ? move(s, i, ui.pct) : attack(s, i, ui.pct);
       sfx("march");
-    } else if (isPlayer(i)) { const n = move(s, i, ui.pct); addLog(`${tn(s)} → ${tn(i)} 병력 ${n} 이동`, "me"); ui.sel = i; fx({ k: "move", src: s, tgt: i, color: PLAYER_COLOR, n, dur: 750 }); sfx("march"); }
+    } else if (isPlayer(i) && travelTurns(s, i) > 1) { move(s, i, ui.pct); toast(`${tn(i)}까지 ${travelTurns(s, i)}턴 행군을 시작했습니다.`); sfx("march"); }
+    else if (isPlayer(i)) { const n = move(s, i, ui.pct); addLog(`${tn(s)} → ${tn(i)} 병력 ${n} 이동`, "me"); ui.sel = i; fx({ k: "move", src: s, tgt: i, color: PLAYER_COLOR, n, dur: 750 }); sfx("march"); }
     else {
       const r = attack(s, i, ui.pct);
+      if (r.march) toast(`${tn(i)}(으)로 진격 개시 · ${travelTurns(s, i)}턴 후 도착해 전투합니다.`);
       // a partial sortie keeps the origin selected so the rest can strike again
       ui.sel = r.win && !r.partial && ui.pct >= 1 ? i : s;
       checkEnd();
@@ -1542,6 +1566,10 @@ function occPattern(fid) {
   }
   return `url(#${occPat[key]})`;
 }
+// where the selected army can go: tinted targets, arrows and a word on each (attack / move / blocked)
+const reachG = root.append("g").attr("pointer-events", "none");
+[["arAtk", "#ff5a44"], ["arMv", "#9be06e"]].forEach(([id, col]) => defs.append("marker").attr("id", id).attr("viewBox", "0 0 10 10").attr("refX", 6).attr("refY", 5)
+  .attr("markerWidth", 4.5).attr("markerHeight", 4.5).attr("orient", "auto-start-reverse").append("path").attr("d", "M0,0L10,5L0,10z").attr("fill", col));
 const cutMesh = { type: "MultiLineString", coordinates: cutLines };
 const cutP = root.append("path").datum(cutMesh).attr("class", "cut");
 const coastP = root.append("path").datum(coastMesh).attr("class", "coast");
@@ -1553,6 +1581,7 @@ const shadeP = root.append("path").datum({ type: "Sphere" }).attr("class", "shad
 const grainP = root.append("path").datum({ type: "Sphere" }).attr("class", "grainlay").attr("fill", "url(#grain)");
 const seaG = root.append("g");
 const sea = seaG.selectAll("path").data(seaPairs).join("path").attr("class", "sea");
+const routeG = root.append("g").attr("pointer-events", "none");
 // ---- unit counters: a stack of tokens per region, nation flag on capitals ----
 const lbl = root.append("g").selectAll("g").data(T).join("g").attr("class", "lbl");
 const tok = lbl.append("g").attr("class", "tok");
@@ -1626,6 +1655,12 @@ function redraw() {
   terr.attr("d", t => cd[t.c]);
   provClip.attr("d", t => gpath(t.cell));
   occG.selectAll("path").attr("d", t => cd[t.c]);
+  reachG.selectAll("path").attr("d", r => cd[r.c]);
+  if (ui.sel >= 0) {
+    const a = T[ui.sel].geoC, seg = r => { const ip = d3.geoInterpolate(a, T[r.i].geoC); return { type: "LineString", coordinates: d3.range(0.14, 0.78, 0.04).map(ip) }; };
+    routeG.selectAll("path").attr("d", r => gpath(seg(r)));
+    routeG.selectAll("text").attr("transform", r => { const q = d3.geoInterpolate(a, T[r.i].geoC)(0.5); return d3.geoDistance(q, center()) < 1.5 ? `translate(${gproj(q)})` : "translate(-999,-999)"; });
+  }
   cutP.attr("d", gpath);
   fbP.attr("d", fbMesh ? gpath(fbMesh) : null);
   const fr = frMesh ? gpath(frMesh) : null; frP.attr("d", fr); frGlow.attr("d", fr);
@@ -1668,6 +1703,15 @@ function render() {
     .classed("tgt-enemy", t => launch && NB(s).has(t.i) && !isPlayer(t.i) && canAttack(s, t.i))
     .classed("tgt-own", t => launch && NB(s).has(t.i) && isPlayer(t.i));
   sea.classed("hot", ([a, b]) => a === s || b === s).attr("display", ([a, b]) => NB(a).has(b) ? null : "none");
+  const showR = s >= 0 && isPlayer(s) && ["deploy", "ops"].includes(S.phase);
+  const routes = showR ? [...NB(s)].filter(knownT).map(j => ({ i: j, c: T[j].c, cell: T[j].cell, sea: T[s].sea.has(j) && !T[s].land.has(j),
+    k: isPlayer(j) ? "mv" : canAttack(s, j) ? "atk" : "no" })) : [];
+  const idle = showR && !canLaunch(s);
+  reachG.selectAll("path").data(routes, r => r.i).join("path").attr("class", r => `reach ${r.k}`).attr("clip-path", r => r.cell ? `url(#pc${r.i})` : null);
+  routeG.selectAll("path").data(routes, r => r.i).join("path").attr("class", r => `route ${r.k}${r.sea ? " sea" : ""}${idle ? " idle" : ""}`);
+  routeG.selectAll("text").data(routes, r => r.i).join("text").attr("class", r => `rtag ${r.k}`)
+    .text(r => { if (r.k === "no") return fl().peace; const d = travelDays(s, r.i), w = r.k === "atk" ? (owner(r.i) < 0 ? "진격" : "공격") : "이동";
+      return idle ? (d > 1 ? `${d}${dUnit()}` : "") : d > 1 || S.mode === "rt" ? `${w} ${d}${dUnit()}` : w; });
   terr.classed("stale", t => !!ui.vis && knownT(t.i) && !seenT(t.i)).classed("fog", t => !knownT(t.i));
   const occL = Object.entries(S.occ || {}).map(([k, oc]) => ({ i: +k, c: T[+k].c, cell: T[+k].cell, oc })).filter(o => knownT(o.i) && fac(o.oc.f));
   occG.selectAll("path").data(occL, o => o.i).join("path").attr("clip-path", o => o.cell ? `url(#pc${o.i})` : null)
@@ -1727,11 +1771,12 @@ function guideText() {
   if (S.phase === "pick") return s < 0 ? "① 지휘할 국가를 지도에서 클릭하세요" : "② 오른쪽의 '작전 개시' 버튼을 누르세요";
   if (S.mode === "rt" && S.phase === "ops") {
     if (S.paused) return "일시정지 중 · 재개를 누르면 시간이 다시 흐릅니다";
-    if (s >= 0 && isPlayer(s)) return "실시간 · 증원이 이 지역에 모입니다. 빨간 점선 = 진격 · 초록 점선 = 이동 (거리만큼 며칠 걸림)";
+    if (s >= 0 && isPlayer(s)) return "실시간 · 증원이 이 지역에 모입니다. 빨간 화살표 = 진격 · 초록 화살표 = 이동 · 회색 = 공격 불가 (거리만큼 며칠 걸림)";
     return "실시간 · 내 지역을 선택하면 증원이 그곳에 모이고 바로 공격할 수 있습니다";
   }
   if (S.phase === "deploy") return `증원 단계 · 밝은색 내 영토를 클릭해 병력 ${S.pool}을 배치하세요 (자동 배치도 가능)`;
-  if (s >= 0 && isPlayer(s) && canLaunch(s)) return "빨간 점선 지역 클릭 = 공격 · 초록 점선 = 병력 이동";
+  if (s >= 0 && isPlayer(s) && canLaunch(s)) return "빨간 화살표 = 공격 · 초록 화살표 = 이동 · 회색 = 공격 불가 · 'n턴'은 그만큼 행군";
+  if (s >= 0 && isPlayer(s)) return S.acted[s] ? "이 지역은 이번 턴에 이미 병력을 보냈습니다 (지역마다 턴당 1번) · 다른 내 지역을 고르세요" : "병력이 1뿐인 지역입니다 · 증원 단계에 병력을 더하거나 이웃 지역에서 옮겨 오세요";
   return "작전 단계 · 출격할 내 영토(밝은색)를 클릭하세요. 다 했으면 '턴 종료'";
 }
 function showRules() {
@@ -1750,7 +1795,7 @@ function showRules() {
   <p><b style="color:var(--signal)">무역</b> · ${fl().trade}(양쪽 자원 증가)와 ${fl().market}(자원끼리 바꾸기).</p>
   <p><b style="color:var(--signal)">실시간 모드</b> · 턴 종료 버튼 없이 1초에 하루씩 시간이 저절로 흐르고, 하루마다 모든 세력이 한 번씩 움직입니다. 공격과 이동은 진군이 되어 며칠 뒤에 도착합니다. 속도는 하루 0.5초~2초로 바꿀 수 있습니다. 증원은 선택해 둔 내 지역에 바로 모이고, 선택이 없으면 전선에 자동으로 나뉩니다. 급할 땐 일시정지하세요.</p>
   <p><b style="color:var(--signal)">난이도 · 지금 ${dif().name}</b> · ${dif().desc} 수도는 언제나 방어력 +50%라 쉽게 무너지지 않습니다.${dif().hGrace ? ` 처음 ${(S.grace ?? 3) + dif().hGrace}${S.mode === "rt" ? "0일" : "턴"} 동안은 컴퓨터가 사람의 땅을 공격하지 않습니다.` : ""}</p>
-  <p><b style="color:var(--signal)">전투</b> · 병력이 많을수록 유리하고, 수비 쪽이 25% 유리합니다. 적 위에 마우스를 올리면 예상 승률이 나옵니다. 이번 턴에 도착한 부대는 다시 움직일 수 없습니다.</p>
+  <p><b style="color:var(--signal)">전투</b> · 병력이 많을수록 유리하고, 수비 쪽이 25% 유리합니다. 적 위에 마우스를 올리면 예상 승률이 나옵니다. 내 지역을 고르면 갈 수 있는 곳에 화살표가 뜹니다(빨강 공격, 초록 이동, 회색 공격 불가). 지역마다 한 턴에 한 번 병력을 보낼 수 있고(공격이든 이동이든), 병력을 받은 지역은 자기 차례를 그대로 씁니다. 먼 곳은 거리만큼 턴이 걸립니다(1,200km마다 1턴, 바다 건너면 +1턴). 화살표에 걸리는 턴이 적혀 있고, 행군 중인 부대는 지도에 보입니다.</p>
   <p><b style="color:var(--signal)">공평한 출발</b> · 어느 세력을 골라도 시작 병력은 똑같습니다. 증원은 영토가 늘수록 늘지만 점점 덜 늘어나서, 큰 제국도 무적이 되지는 않습니다. 시작 후 몇 턴 동안은 세력끼리 서로 공격하지 않고 빈 땅만 차지합니다.</p>
   <p><b style="color:var(--signal)">지방과 점령도</b> · 큰 나라는 여러 지방으로 나뉘어 한 곳씩 차지해야 합니다. 넓은 지방은 2~3번 이겨야 넘어오고, 이길 때마다 점령도가 오르며 지도에 공격한 쪽 색의 빗금이 짙어집니다(병력이 3배 이상이면 2칸, 6배 이상이면 한 번에). 점령 중인 공격군은 출발지로 돌아가 그 턴에는 다시 출격하지 못하니, 여러 방향에서 함께 치면 빨리 무너집니다. 공세를 멈추면 점령도는 조금씩 줄어듭니다. 수도를 잃으면 전군 병력이 15% 줄고, 나라의 중심 지방을 잃으면 그 나라의 남은 지방 병력이 20% 줄어듭니다.</p>
   <p><b style="color:var(--signal)">바다</b> · 점선은 해상 항로입니다. 바다 건너 나라도 항로로 연결되면 공격할 수 있습니다.</p>
@@ -1899,7 +1944,7 @@ function drawArrows() {
 // own armies and those coming at me are drawn bright (threats in red with days left); the rest dimmed, at most 60
 let marchRAF = 0;
 function marchView() {
-  if (!S || S.mode !== "rt" || !["ops", "over"].includes(S.phase)) return [];
+  if (!S || !["ops", "over", "deploy"].includes(S.phase)) return [];
   const pri = m => m.f === S.player || owner(m.t) === S.player ? 0 : 1;
   return marches().filter(m => m.f === S.player || seenT(m.s) || seenT(m.t)).sort((a, b) => pri(a) - pri(b)).slice(0, 60);
 }
@@ -1933,7 +1978,7 @@ function drawMarches(now = performance.now()) {
     const pts = d3.range(0, 13).map(k => sc(ip(q + (1 - q) * k / 12))).filter(Boolean);
     g.select(".tr").attr("stroke", threat ? "#ff5a3c" : col).attr("d", pts.length > 1 ? "M" + pts.map(v => v[0].toFixed(1) + "," + v[1].toFixed(1)).join("L") : null);
     g.select(".bx").attr("transform", `translate(${P})`).select("rect").attr("fill", col);
-    g.select(".n").attr("fill", threat ? "#ffb4a2" : "#f3ead0").text(threat ? `${m.n} · ${Math.max(1, m.d1 - S.turn)}일` : m.n);
+    g.select(".n").attr("fill", threat ? "#ffb4a2" : "#f3ead0").text(threat ? `${m.n} · ${Math.max(1, m.d1 - S.turn)}${dUnit()}` : m.n);
     g.select(".ring").attr("display", threat ? null : "none").attr("transform", `translate(${P})`).attr("r", 10 + 8 * pulse).attr("opacity", 1 - pulse);
   });
   marchRAF = list.length ? requestAnimationFrame(drawMarches) : 0;
@@ -2117,8 +2162,8 @@ function renderSel() {
   }
   if (isPlayer(i)) {
     if (S.phase === "deploy") hint = `클릭할 때마다 이곳에 병력 <strong>+${ui.step > 99 ? "전부" : ui.step}</strong>을 배치합니다.`;
-    else if (!canLaunch(i)) hint = S.acted[i] ? "이번 턴에 도착한 부대라 다시 움직일 수 없습니다." : "병력이 1뿐이라 출격할 수 없습니다.";
-    else hint = `<strong>빨간 점선</strong> 지역을 클릭하면 ${sendN(i, ui.pct)}${unit()}(${Math.round(ui.pct * 100)}%)으로 공격, <strong>초록 점선</strong>은 아군 지역으로 이동합니다. 비율은 위쪽 버튼이나 키보드 1~4로 바꿉니다.`;
+    else if (!canLaunch(i)) hint = S.acted[i] ? "이번 턴에 이미 병력을 보낸 지역입니다(지역마다 턴당 1번). 흐린 화살표는 다음 턴에 갈 수 있는 곳입니다." : "병력이 1뿐이라 출격할 수 없습니다. 흐린 화살표는 병력을 채우면 갈 수 있는 곳입니다.";
+    else hint = `<strong>빨간 화살표</strong> 지역을 클릭하면 ${sendN(i, ui.pct)}${unit()}(${Math.round(ui.pct * 100)}%)으로 공격, <strong>초록 화살표</strong>는 아군 지역으로 이동합니다(지역마다 턴당 1번, 도착한 병력은 그 지역에서 다시 보낼 수 있음). 회색은 ${fl().peace} 상대라 공격할 수 없습니다. 비율은 위쪽 버튼이나 키보드 1~4로 바꿉니다.`;
   } else hint = "아군 지역을 먼저 선택한 뒤 이 지역을 클릭하면 공격합니다.";
   const live = S.phase === "deploy" || S.phase === "ops";
   const build = isPlayer(i) && live && S.res ? `<h4 class="sub">건설 (내정)</h4><div class="blds">${BLD.map((b, k) => {
@@ -2145,7 +2190,7 @@ function renderMe() {
     <span>${per}당 증원</span><b>${mine.length ? troopInc(S.player) : 0} + ${bName(1)} ${barr}</b>
     <span>병력 이자</span><b>${mine.length ? `+${interest(S.player).toFixed(1)}` : 0} · 상한 ${troopCap(S.player)}</b>
     ${comboOf(S.player) ? `<span>전격전</span><b style="color:var(--signal)">${comboOf(S.player)}연승 · 공격력 +${comboPct(S.player)}%</b>` : ""}
-    ${S.mode === "rt" ? `<span>진군 중</span><b>${d3.sum(marches().filter(m => m.f === S.player), m => m.n)}${unit()}</b>
+    ${S.mode === "rt" || marches().length ? `<span>진군 중</span><b>${d3.sum(marches().filter(m => m.f === S.player), m => m.n)}${unit()}</b>
     <span>접근 중인 적</span><b style="${d3.sum(marches().filter(m => m.f !== S.player && owner(m.t) === S.player), m => m.n) ? "color:var(--danger)" : ""}">${d3.sum(marches().filter(m => m.f !== S.player && owner(m.t) === S.player), m => m.n)}${unit()}</b>` : ""}
     <span>세계 장악률</span><b>${(share(S.player) * 100).toFixed(1)}% / 50%</b>
     <span>수도</span><b>${owner(f.home) === S.player ? "보유" : "함락됨"}</b>
@@ -2249,7 +2294,7 @@ function showTip(e, i) {
   if (S.phase !== "pick" && s >= 0 && isPlayer(s) && !isPlayer(i) && NB(s).has(i) && canLaunch(s) && canAttack(s, i)) {
     const n = sendN(s, ui.pct), p = odds(atkStr(owner(s), i, n), S.troops[i], defMul(i));
     html += `<div class="row"><span>출격 ${Math.round(ui.pct * 100)}%</span><b>${n}${unit()}${comboOf(S.player) ? ` · 전격전 +${comboPct(S.player)}%` : ""}</b></div>`;
-    if (S.mode === "rt") html += `<div class="row"><span>도착까지</span><b>${travelDays(s, i)}일</b></div>`;
+    if (S.mode === "rt" || travelDays(s, i) > 1) html += `<div class="row"><span>도착까지</span><b>${travelDays(s, i)}${dUnit()}</b></div>`;
     html += `<div class="odds row"><span>${S.mode === "rt" ? "지금 기준 승률" : "예상 승률"}</span><b style="color:${p > .6 ? "var(--ok)" : p < .4 ? "var(--danger)" : "var(--signal)"}">${Math.round(p * 100)}%</b></div>`;
   }
   tip.innerHTML = html; tip.hidden = false; posTip(e);
