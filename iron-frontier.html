@@ -1690,6 +1690,8 @@ function redraw() {
   const fr = frMesh ? gpath(frMesh) : null; frP.attr("d", fr); frGlow.attr("d", fr);
   sea.attr("d", ([a, b]) => gpath({ type: "LineString", coordinates: [T[a].geoC, T[b].geoC] }));
   placeLabels(); placePop();
+  // marching armies must follow the globe too, or they hang where it used to be
+  drawMarches();
 }
 const center = () => gproj.invert([W / 2, H / 2]);
 const facing = i => d3.geoDistance(T[i].geoC, center()) < 1.45;
@@ -1759,7 +1761,6 @@ function render() {
   cnt.select("text").text(t => S.troops[t.i]);
   drawArrows();
   redraw();
-  if (!marchRAF) drawMarches();
   // top bar
   document.body.classList.toggle("ancient", !!S.era);
   const picking = S.phase === "pick" || S.phase === "scenario" || S.phase === "lobby";
@@ -1973,11 +1974,15 @@ function marchView() {
   return marches().filter(m => m.f === S.player || seenT(m.s) || seenT(m.t)).sort((a, b) => pri(a) - pri(b)).slice(0, 60);
 }
 function marchFrac(now) {
+  // turn-based armies stand at their day's spot; only the real-time clock moves them between days
+  if (S.mode !== "rt") return (ui.lastFrac = 0);
   if (S.paused || S.phase !== "ops") return ui.lastFrac || 0;
   const f = Math.max(0, Math.min(1, (now - (ui.tickAt || now)) / (SPEEDS[S.speed] || 1000)));
   return (ui.lastFrac = f);
 }
 function drawMarches(now = performance.now()) {
+  // one loop at most: a direct call (globe moved, new game) replaces the queued frame
+  if (marchRAF) { cancelAnimationFrame(marchRAF); marchRAF = 0; }
   const list = marchView(), c = center(), fr = marchFrac(now);
   const sc = geo => d3.geoDistance(geo, c) < 1.5 ? gproj(geo) : null;
   const sel = marchG.selectAll("g.mr").data(list, m => m.id);
