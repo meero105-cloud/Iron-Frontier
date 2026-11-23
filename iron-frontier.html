@@ -159,6 +159,17 @@ svg.moving .terr { transition: none; }
 .tip .row { display: flex; justify-content: space-between; gap: 12px; color: var(--ink-dim); align-items: center; }
 .tip .row b { color: var(--ink); font-family: var(--font-data); font-weight: 600; }
 .tip .odds { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); }
+/* the small card beside the selected region (placePop keeps it inside the map) */
+.pop { position: absolute; z-index: 5; width: 196px; padding: 7px 9px 9px; border-radius: 2px; font-size: 12px; }
+.pop h4 { margin: 0 0 4px; font-family: var(--font-display); font-weight: 400; font-size: 14px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.pop .x { padding: 0 6px; font-size: 15px; line-height: 1.3; }
+.pop .row { display: flex; justify-content: space-between; align-items: center; gap: 10px; color: var(--ink-dim); }
+.pop .row span { display: flex; align-items: center; min-width: 0; }
+.pop .row b { color: var(--ink); font-family: var(--font-data); font-weight: 600; }
+.pop .popb { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-top: 6px; }
+.pop .popb button, .pop > button { font-size: 11.5px; padding: 4px 6px; }
+.pop > button { width: 100%; margin-top: 6px; }
+.pop .hint { font-size: 11.5px; margin-top: 4px; }
 
 .legend { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: 12px; font-size: 11px; color: #cfc8ae; z-index: 3;
   background: rgba(18,21,14,.82); padding: 6px 10px; border-radius: 3px; border: 1px solid #3b4230; line-height: 1.5;
@@ -1822,8 +1833,22 @@ function guideText() {
   if (s >= 0 && isPlayer(s)) return S.acted[s] ? "이 지역은 이번 턴에 이미 병력을 보냈습니다 (지역마다 턴당 1번) · 다른 내 지역을 고르세요" : "병력이 1뿐인 지역입니다 · 증원 단계에 병력을 더하거나 이웃 지역에서 옮겨 오세요";
   return "작전 단계 · 출격할 내 영토(밝은색)를 클릭하세요. 다 했으면 '턴 종료'";
 }
-function showRules() {
-  const box = document.getElementById("overlayBox");
+// the start card: just enough to make the first move; the full rulebook is one button away
+function showRules(full) {
+  const box = document.getElementById("overlayBox"), rt = S.mode === "rt";
+  if (full !== true) {
+    box.innerHTML = `<h2>작전 개시</h2>
+  <p><b style="color:var(--signal)">목표</b> · 세계 영토 가치의 절반을 차지하면 승리. 내 땅을 모두 잃으면 패배.</p>
+  <p>${rt ? "" : `1. <b>증원</b> · 받은 병력을 내 땅에 눌러 배치하거나 '자동 배치'를 누릅니다.<br>`}${rt ? 1 : 2}. <b>내 땅을 누르면</b> 갈 수 있는 곳에 화살표가 뜹니다. 빨강은 공격, 초록은 이동.<br>${rt ? 2 : 3}. <b>화살표 끝 지역을 누르면</b> 출격합니다. 보낼 병력은 위쪽 25~100%(키보드 1~4).<br>${rt ? `3. <b>시간은 저절로</b> 흐르고 증원도 매일 들어옵니다. 급할 땐 일시정지.` : `4. <b>턴 종료</b>를 누르면 컴퓨터가 움직이고 다음 계절이 됩니다.`}</p>
+  <p>적 위에 마우스를 올리면 예상 승률이 보입니다. 나머지는 하면서 익히면 됩니다.</p>
+  <div class="btnrow"><button type="button" class="primary" id="closeRules">시작하기</button><button type="button" id="fullRules">규칙 자세히</button></div>`;
+    document.getElementById("overlay").hidden = false;
+    document.getElementById("closeRules").onclick = hideOverlay;
+    document.getElementById("fullRules").onclick = () => showRules(true);
+    document.getElementById("closeRules").focus();
+    bindBackdrop();
+    return;
+  }
   box.innerHTML = `<h2>게임 방법</h2>
   <p><b style="color:var(--signal)">목표</b> · 세계 영토 가치의 50%를 차지하거나 다른 열강을 모두 무너뜨리면 승리. 내 영토를 모두 잃으면 패배.</p>
   <p><b style="color:var(--signal)">한 턴의 순서</b><br>1. <b>증원</b>: 턴마다 받은 병력을 내 영토(밝은 상아색)에 클릭해 배치합니다.<br>2. <b>작전</b>: 내 영토를 클릭한 뒤 맞닿은 적 영토를 클릭하면 공격합니다. 아군 영토를 클릭하면 병력이 이동합니다.<br>3. <b>턴 종료</b>: 컴퓨터 열강들이 움직이고 다음 계절이 됩니다.</p>
@@ -1845,7 +1870,11 @@ function showRules() {
   <button type="button" class="primary" id="closeRules">알겠습니다</button>`;
   document.getElementById("overlay").hidden = false;
   document.getElementById("closeRules").onclick = hideOverlay;
-  // a click on the dark backdrop closes the rules too (only the rules: other overlays need a choice)
+  box.scrollTop = 0;
+  bindBackdrop();
+}
+// a click on the dark backdrop closes the rules too (only the rules: other overlays need a choice)
+function bindBackdrop() {
   document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) hideOverlay(); };
 }
 // ---- battle effects: arrows, explosions, flags planted, troop columns; all positioned on the globe every frame ----
@@ -2377,7 +2406,7 @@ document.getElementById("pauseBtn").onclick = () => { S.paused = !S.paused; toas
 document.querySelectorAll("#speedSeg button").forEach(b => b.onclick = () => { S.speed = b.dataset.speed; startClock(); render(); persist(); });
 document.getElementById("autoBtn").onclick = () => { autoDeploy(); S.phase = "ops"; toast("전선 위주로 자동 배치했습니다."); render(); persist(); };
 document.getElementById("newBtn").onclick = newGame;
-document.getElementById("rulesBtn").onclick = showRules;
+document.getElementById("rulesBtn").onclick = () => showRules();
 document.querySelectorAll("#stepSeg button").forEach(b => b.onclick = () => {
   ui.step = +b.dataset.step;
   document.querySelectorAll("#stepSeg button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
