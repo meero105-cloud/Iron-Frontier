@@ -1827,6 +1827,8 @@ function showRules() {
   <button type="button" class="primary" id="closeRules">알겠습니다</button>`;
   document.getElementById("overlay").hidden = false;
   document.getElementById("closeRules").onclick = hideOverlay;
+  // a click on the dark backdrop closes the rules too (only the rules: other overlays need a choice)
+  document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) hideOverlay(); };
 }
 // ---- battle effects: arrows, explosions, flags planted, troop columns; all positioned on the globe every frame ----
 const RM = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -2364,7 +2366,11 @@ document.querySelectorAll("#stepSeg button").forEach(b => b.onclick = () => {
 const setPct = p => { ui.pct = p; if (S) render(); };
 document.querySelectorAll("#pctSeg button").forEach(b => b.onclick = () => setPct(+b.dataset.pct));
 document.addEventListener("keydown", e => {
-  if (e.key === "Escape") { ui.sel = -1; render(); return; }
+  if (e.key === "Escape") {
+    // Esc closes the rules sheet first; with nothing open it clears the selection
+    if (!document.getElementById("overlay").hidden) { if (document.getElementById("closeRules")) hideOverlay(); return; }
+    ui.sel = -1; render(); return;
+  }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.altKey || e.metaKey) return;
   const p = { 1: 0.25, 2: 0.5, 3: 0.75, 4: 1 }[e.key];
   if (p && S && (S.phase === "deploy" || S.phase === "ops")) setPct(p);
