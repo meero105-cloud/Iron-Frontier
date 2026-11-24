@@ -63,7 +63,8 @@ body {
 .chip { font-family: var(--font-display); font-size: 12.5px; letter-spacing: .06em; padding: 4px 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,.5); color: #cfc8ad; background: rgba(0,0,0,.25); white-space: nowrap; }
 .chip.live { color: #1b1606; background: linear-gradient(#f2c95a, #d9a531); border-color: #6e4f12; box-shadow: 0 0 0 1px rgba(255,220,130,.25), 0 0 14px rgba(233,185,73,.35); }
 .spacer { flex: 1; }
-.controls { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.controls, .menu { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.menu .ph { display: none; }
 button {
   font: inherit; font-size: 13px; color: #efe8cf;
   background: linear-gradient(180deg, #535a3c 0%, #3b4129 100%);
@@ -327,6 +328,7 @@ svg.moving .terr { transition: none; }
   transform: rotate(-12deg); opacity: .88; animation: stamp .42s .25s cubic-bezier(.3,1.6,.5,1) both; mix-blend-mode: multiply; background: rgba(255,255,255,.12); }
 .report .stamp.ok { color: #2f6b26; border-color: #2f6b26; }
 .report .stamp.bad { color: #a52a1a; border-color: #a52a1a; }
+.report .rp-raze { margin-top: 7px; padding: 3px 6px; font-size: 11.5px; font-weight: 700; color: #a52a1a; background: rgba(165, 42, 26, .1); border-left: 3px solid #a52a1a; }
 @keyframes stamp { from { transform: rotate(-12deg) scale(2.4); opacity: 0; } }
 .turnban { position: absolute; left: 0; right: 0; top: 40%; z-index: 4; pointer-events: none; text-align: center; padding: 12px 0;
   background: linear-gradient(90deg, transparent, rgba(12,14,9,.86) 18%, rgba(12,14,9,.86) 82%, transparent);
@@ -356,10 +358,77 @@ svg.moving .terr { transition: none; }
   .stat b { font-size: 13px; }
   .chip { font-size: 11.5px; padding: 3px 8px; }
   .spacer { display: none; }
-  .controls { gap: 5px; }
-  .controls button, .seg button { padding: 6px 8px; font-size: 12px; }
-  #sndBtn { min-width: 32px; padding: 6px 7px; }
-  .mapwrap { height: 58vh; }
+  .menu { gap: 5px; margin-left: auto; flex-wrap: nowrap; }
+  .menu button { padding: 6px 8px; font-size: 12px; }
+  .menu .dk { display: none; }
+  .menu .ph { display: inline; font-weight: 700; }
+  #sndBtn, #rulesBtn { min-width: 32px; padding: 6px 7px; }
+  /* status stays on one row at the top; the commands sit at the bottom where the thumb is */
+  .bar { position: sticky; top: 0; flex-wrap: nowrap; }
+  .app { --cmdH: 0px; }
+  .app:has(.controls > :not([hidden])) { --cmdH: calc(62px + env(safe-area-inset-bottom, 0px)); }
+  /* deploying (or real time) needs a second row: placing on top, sending below */
+  .app:has(#stepSeg:not([hidden])), .app:has(#speedSeg:not([hidden])) { --cmdH: calc(114px + env(safe-area-inset-bottom, 0px)); }
+  .controls { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 6px; flex-wrap: wrap; justify-content: center;
+    padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    background: var(--grain), linear-gradient(0deg, #2a2f1e 0%, #333924 45%, #434a2e 100%);
+    border-top: 2px solid #0e100a; box-shadow: 0 -3px 10px rgba(0,0,0,.55); }
+  .controls:not(:has(> :not([hidden]))) { display: none; }
+  .controls > .seg { flex: 1 1 55%; min-width: 0; }
+  .controls > button { white-space: nowrap; }
+  #autoBtn, #pauseBtn { flex: 1 1 30%; }
+  .controls .seg button { flex: 1; }
+  .controls button { min-height: 44px; padding: 8px 10px; font-size: 14px; }
+  .controls { row-gap: 8px; }
+  .controls .seg button { padding: 8px 4px; }
+  #endBtn { flex: none; padding-inline: 16px; }
+  #goBtn { flex: 1; }
+  /* the globe takes what is left, with the resource strip peeking out below as a hint to scroll for the panels */
+  .mapwrap { height: calc(100vh - 46px - var(--cmdH) - 64px); height: calc(100dvh - 46px - var(--cmdH) - 64px); min-height: 300px; }
+  .side { padding-bottom: calc(var(--cmdH) + 12px); }
+  .bar .stat b, .menu button, .chip { white-space: nowrap; }
+  /* fingers, not a mouse: every button at least about 40px, panel text about 12-13px */
+  .menu button { min-height: 40px; min-width: 40px; }
+  .tabs button { min-height: 44px; padding: 10px 12px; font-size: 13.5px; }
+  .side, .overlay .box, .report { zoom: 1.1; }
+  .legend { font-size: 12px; }
+  .pickbanner { left: 8px; right: 8px; transform: none; width: auto; max-width: none; font-size: 13.5px; }
+  /* the selected region's card docks along the bottom of the map so it never covers the targets around it */
+  .pop.dock { left: 8px !important; right: 8px; top: auto !important; bottom: 8px; width: auto; font-size: 13.5px; padding: 9px 12px 11px; }
+  .pop.dock h4 { font-size: 17px; }
+  .pop.dock .x { min-width: 40px; min-height: 36px; font-size: 20px; }
+  .pop.dock .popb { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .pop.dock .popb button, .pop.dock > button { font-size: 13px; min-height: 40px; padding: 6px 4px; }
+  .pop.dock .hint { font-size: 13px; }
+  .lbl .tok { pointer-events: auto; cursor: pointer; }
+  /* the instruction strip wraps to two lines here, so notices drop below it */
+  .toast, .report { top: 88px; }
+}
+/* phones held sideways: height is what is scarce, so the bar is one thin row and the panel sits beside the map */
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 561px) {
+  .app { height: 100%; }
+  body { overflow: hidden; }
+  .main { grid-template-columns: minmax(0, 1fr) 300px; }
+  .mapwrap { height: auto; }
+  .side { overflow: auto; border-top: 0; border-left: 2px solid #0e100a; padding-left: 12px; }
+  .bar { flex-wrap: nowrap; gap: 6px; padding-block: 4px; }
+  .brand > div, .stat span, #turnStat, .spacer, .legend { display: none; }
+  .controls, .menu { flex-wrap: nowrap; gap: 5px; }
+  .menu { margin-left: auto; }
+  .menu .dk { display: none; }
+  .menu .ph { display: inline; font-weight: 700; }
+  .controls button, .seg button, .menu button { min-height: 40px; min-width: 40px; padding: 6px 9px; font-size: 13px; white-space: nowrap; }
+  .controls .seg button { min-width: 44px; }
+  .tabs { flex-wrap: nowrap; }
+  .tabs button { min-height: 40px; font-size: 13px; padding: 8px 8px; white-space: nowrap; }
+  .side, .report { zoom: 1.05; }
+  .pickbanner { font-size: 12.5px; top: 8px; }
+  .lbl .tok { pointer-events: auto; cursor: pointer; }
+}
+/* small phones: the emblem gives its room to the date and the menu */
+@media (max-width: 380px) {
+  .bar .brand { display: none; }
+  .bar { gap: 6px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .terr { transition: none; }
@@ -396,8 +465,11 @@ svg.moving .terr { transition: none; }
       </div>
       <button type="button" id="pauseBtn" hidden>❚❚ 일시정지</button>
       <button type="button" id="endBtn" class="primary" hidden>턴 종료</button>
+      <button type="button" id="goBtn" class="primary" hidden>작전 개시</button>
+    </div>
+    <div class="menu">
       <button type="button" id="sndBtn" aria-label="효과음 켜기/끄기" title="효과음">🔊</button>
-      <button type="button" id="rulesBtn">게임 방법</button>
+      <button type="button" id="rulesBtn" aria-label="게임 방법"><span class="dk">게임 방법</span><span class="ph" aria-hidden="true">?</span></button>
       <button type="button" id="newBtn">새 게임</button>
     </div>
   </header>
@@ -882,12 +954,14 @@ function startGroups(id, pick) {
 }
 function showScenarios() {
   const box = document.getElementById("overlayBox");
+  // online play needs claude.ai's room; on GitHub Pages, itch.io or in the app the button is gone, so an old choice of it falls back to turns
+  if (S.mode === "net" && !(window.claude && window.claude.use)) S.mode = "turn";
   const card = sc => `<button type="button" class="scenbtn" data-id="${sc.id}"><b>${sc.name}</b><em>${sc.level}</em><span>${sc.desc}</span></button>`;
   box.innerHTML = `<h2>시나리오 선택</h2><p>어느 시대에서 시작할지 고르세요. 어느 쪽을 골라도 모든 세력은 같은 조건에서 출발합니다.</p>
     <h3 class="scenh">모드</h3>
     <div class="modes">${Object.entries(DIFFS).map(([k, d]) => `<div class="modecard${S.diff === k && S.mode !== "net" ? " on" : ""}"><b>${d.name}</b><small>${d.short}</small>
       <div class="seg modeseg"><button type="button" data-diff="${k}" data-mode="turn" aria-pressed="${S.diff === k && S.mode === "turn"}">턴제</button><button type="button" data-diff="${k}" data-mode="rt" aria-pressed="${S.diff === k && S.mode === "rt"}">실시간</button></div></div>`).join("")}</div>
-    <div class="seg modeseg netseg"><button type="button" data-mode="net" aria-pressed="${S.mode === "net"}">온라인 대전 · 다른 유저와 실시간</button></div>
+    ${window.claude && window.claude.use ? `<div class="seg modeseg netseg"><button type="button" data-mode="net" aria-pressed="${S.mode === "net"}">온라인 대전 · 다른 유저와 실시간</button></div>` : ""}
     <p class="modehint"><b>${S.mode === "net" ? "온라인 대전" : `${dif().name} · ${S.mode === "rt" ? "실시간" : "턴제"}`}</b> · ${S.mode === "turn" ? "차례대로 진행합니다. 턴 종료를 누를 때까지 시간이 멈춰 있고, 공격하면 바로 전투합니다." : S.mode === "rt" ? "1초에 하루씩 흐릅니다. 부대는 거리만큼 며칠 걸려 진군하고, 다가오는 적이 지도에 보입니다." : roomApi ? "사람끼리는 모든 규칙이 같고, 빈 세력은 컴퓨터가 맡습니다(" + dif().name + " 기준). 아래 시나리오를 누르면 방을 만들고 코드가 나옵니다. 친구의 방에 들어가려면 코드를 입력하세요." : "이 화면에서는 네트워크 연결을 쓸 수 없습니다. claude.ai에 로그인한 상태에서 이 페이지를 열어 주세요."}${S.mode === "net" ? "" : ` 컴퓨터: ${dif().desc}`}</p>
     ${S.mode === "net" && roomApi ? `<div class="joinrow"><input id="joinCode" maxlength="8" placeholder="방 코드" autocomplete="off" aria-label="방 코드"><button type="button" id="joinBtn" class="primary">참가</button></div>` : ""}
     <h3 class="scenh">선사 · 고대</h3><div class="scen">${ERAS.map(card).join("")}</div>
@@ -1204,11 +1278,13 @@ function aiEcon(f) {
   const me = f.id, r = S.res[me], mine = owned(me);
   if (!mine.length) return;
   const front = mine.filter(i => enemyNbrs(i).some(j => owner(j) < 0 || !atPeace(me, owner(j))));
+  // battles tear buildings down, so the computer builds behind the front where it can (walls still go on the line)
+  const safe = mine.filter(i => !front.includes(i) && !incoming(i, me).length), base = safe.length ? safe : mine;
   for (let k = 0; k < 2; k++) {
     const roll = Math.random();
     let i, b;
-    if (roll < 0.4 && front.length) { i = front[Math.floor(Math.random() * front.length)]; b = 1; }
-    else if (roll < 0.8) { i = mine.slice().sort((x, y) => T[y].value - T[x].value)[Math.floor(Math.random() * Math.min(3, mine.length))]; b = Math.random() < 0.7 ? 0 : 3; }
+    if (roll < 0.4) { i = base[Math.floor(Math.random() * base.length)]; b = 1; }
+    else if (roll < 0.8) { i = base.slice().sort((x, y) => T[y].value - T[x].value)[Math.floor(Math.random() * Math.min(3, base.length))]; b = Math.random() < 0.7 ? 0 : 3; }
     else if (front.length) { i = front.slice().sort((x, y) => d3.sum(enemyNbrs(y), j => S.troops[j]) - d3.sum(enemyNbrs(x), j => S.troops[j]))[0]; b = 2; }
     if (i !== undefined && lvl(i, b) < BLD[b].max && canPay(me, BLD[b].cost(lvl(i, b) + 1))) doAction(me, { k: "build", s: i, b });
   }
@@ -1363,13 +1439,29 @@ function attack(src, tgt, pct = 1) {
   S.troops[src] -= a;
   return resolveAttack(owner(src), src, tgt, a);
 }
+// war damages the buildings of region i by the size of the attacking army n:
+// 100+ tears everything down, 10+ drops every building a level, 5+ hits the biggest one, fewer does no harm.
+// Returns what happened ("시설 모두 파괴 · 시장 2 · 성채 1") or "" when nothing was lost.
+const RAZE_ALL = 100, RAZE_LVL = 10, RAZE_ONE = 5;
+function raze(i, n) {
+  if (!S.bld || !S.bld[i] || !S.bld[i].some(x => x) || n < RAZE_ONE) return "";
+  const b = S.bld[i], was = b.slice();
+  if (n >= RAZE_ALL) b.fill(0);
+  else if (n >= RAZE_LVL) b.forEach((L, k) => { if (L) b[k] = L - 1; });
+  else { const k = d3.maxIndex(b); b[k]--; }
+  const lost = was.map((L, k) => L !== b[k] ? `${bName(k)} ${L}→${b[k]}` : "").filter(Boolean).join(" · ");
+  return `${n >= RAZE_ALL ? "시설 모두 파괴" : n >= RAZE_LVL ? "시설 1단계씩 하락" : "시설 1곳 피해"} · ${lost}`;
+}
 function resolveAttack(att, src, tgt, a) {
   const def = owner(tgt), d = S.troops[tgt];
   const r = battle(atkStr(att, tgt, a), d, defMul(tgt));
   if (r.win) r.left = Math.min(a, r.left);
   const mine = fac(att).isPlayer, vsMe = def >= 0 && fac(def).isPlayer;
-  arrows.push({ src, tgt, att, def, a, d, mine, vsMe, color: mine ? PLAYER_COLOR : fac(att).color, win: r.win });
+  // war ruins a land: a battle damages the region's buildings by the size of the attack, whoever wins
+  r.razed = raze(tgt, a);
+  arrows.push({ src, tgt, att, def, a, d, mine, vsMe, color: mine ? PLAYER_COLOR : fac(att).color, win: r.win, razed: r.razed });
   const who = fac(att).name, where = tn(tgt);
+  if (r.razed && (mine || vsMe || seenT(tgt))) addLog(`${where} 전화(戰火) · ${r.razed}`, mine || vsMe ? "bad" : "");
   if (!S.combo) S.combo = {};
   S.combo[att] = r.win ? { n: comboOf(att) + 1, t: S.turn } : null;
   r.combo = r.win ? S.combo[att].n : 0;
@@ -1389,7 +1481,6 @@ function resolveAttack(att, src, tgt, a) {
     }
     delete S.occ[tgt];
     S.owners[tgt] = att; S.troops[tgt] = r.left; S.acted[tgt] = true;
-    if (S.bld && S.bld[tgt][2] > 0) S.bld[tgt][2]--;   // walls are damaged in the assault
     const capital = def >= 0 && fac(def).home === tgt;
     if (mine || vsMe || seenT(tgt)) addLog(`${who}, ${where} 점령${capital ? " · 수도 함락" : ""} (${a} 대 ${d})`, mine ? "me" : vsMe ? "bad" : "");
     // losing a capital shakes everyone: the whole army if it was the faction's seat, else the rest of that country
@@ -1674,6 +1765,8 @@ const routeG = root.append("g").attr("pointer-events", "none");
 // ---- unit counters: a stack of tokens per region, nation flag on capitals ----
 const lbl = root.append("g").selectAll("g").data(T).join("g").attr("class", "lbl");
 const tok = lbl.append("g").attr("class", "tok");
+// on a phone many regions are smaller than a fingertip, so the counter on top of a region selects it too
+tok.on("click", (e, t) => { if (!TOUCH) return; e.stopPropagation(); tip.hidden = true; onClick(t.i); });
 const flagG = tok.append("g").attr("class", "fl");
 flagG.append("line").attr("class", "pole").attr("x1", -10).attr("y1", -6).attr("x2", -10).attr("y2", -25);
 flagG.append("use").attr("x", -10).attr("y", -25).attr("width", 15).attr("height", 10);
@@ -1693,8 +1786,9 @@ lbl.append("text").attr("class", "occ").attr("y", -19);
 const marchG = root.append("g").attr("class", "marches").attr("pointer-events", "none");
 const fxG = root.append("g").attr("class", "fx");
 // compass rose on the map table
+let roseG;
 (function rose() {
-  const g = svg.append("g").attr("transform", `translate(${W - 44},${H - 46})`).attr("opacity", .72).attr("pointer-events", "none");
+  const g = roseG = svg.append("g").attr("transform", `translate(${W - 44},${H - 46})`).attr("opacity", .72).attr("pointer-events", "none");
   g.append("circle").attr("r", 25).attr("fill", "rgba(15,18,12,.55)").attr("stroke", "#c9a24a").attr("stroke-width", .8);
   g.append("circle").attr("r", 20).attr("fill", "none").attr("stroke", "#c9a24a").attr("stroke-width", .5).attr("stroke-dasharray", "1 2.2");
   g.append("path").attr("d", "M0,-30L5,-5L30,0L5,5L0,30L-5,5L-30,0L-5,-5Z").attr("fill", "#2a2e1e").attr("stroke", "#c9a24a").attr("stroke-width", .8);
@@ -1764,27 +1858,72 @@ function redraw() {
   drawMarches();
 }
 const center = () => gproj.invert([W / 2, H / 2]);
+// the map box follows the screen: on a tall phone the 960x470 table is cropped around the globe so it fills the width
+let VB = { x: 0, y: 0, w: W, h: H };
+// on a touch screen the counters and names are drawn larger, so a number reads at about 11px instead of 6px
+const TOUCH = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
+let LS0 = 1;
+const LS = () => LS0 > 1 ? LS0 * Math.min(1.5, 1 + (K - 1) * 0.1) : 1;
+function fitView() {
+  const r = svg.node().getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const a = r.width / r.height;
+  // landscape screens keep the whole table as before; portrait ones narrow it smoothly down to the globe's width
+  const w = Math.min(W, Math.max(500, W * a)), h = w / a;
+  VB = a >= W / H ? { x: 0, y: 0, w: W, h: H } : { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  svg.attr("viewBox", `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
+  LS0 = TOUCH ? Math.max(1, 1.45 / (Math.min(r.width / VB.w, r.height / VB.h))) : 1;
+  roseG.attr("transform", `translate(${VB.x + VB.w - 44},${VB.y + VB.h - 46})`);
+  if (S) placeLabels();
+  placePop();
+}
+if (window.ResizeObserver) new ResizeObserver(fitView).observe(document.getElementById("mapwrap")); else addEventListener("resize", fitView);
+fitView();
 const facing = i => d3.geoDistance(T[i].geoC, center()) < 1.45;
 function placeLabels() {
   if (!S) return;
   const c = center(), homes = new Set(S.factions.map(f => f.home));
-  lbl.attr("display", t => {
-    if (!knownT(t.i) || d3.geoDistance(t.geoC, c) > 1.45) return "none";
-    const near = ui.sel >= 0 && NB(ui.sel).has(t.i);
-    return (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near || homes.has(t.i) || (S.occ && S.occ[t.i]) || (K >= 2 && isPlayer(t.i))) ? null : "none";
-  }).attr("transform", t => `translate(${gproj(t.geoC)})`).classed("neu", t => owner(t.i) < 0);
+  const ls = LS();
+  const near = t => ui.sel >= 0 && NB(ui.sel).has(t.i);
+  const want = t => knownT(t.i) && d3.geoDistance(t.geoC, c) <= 1.45 &&
+    (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near(t) || homes.has(t.i) || (S.occ && S.occ[t.i]) || (K >= 2 && isPlayer(t.i)));
   // the closer you zoom, the more you see: names, then specialty resource, then buildings
   const fs = Math.min(11, 6.5 + K * 0.45), fn = Math.min(12.5, 7.5 + K * 0.65);
   const base = t => 6.5 * tokScale(t.i) + (seenT(t.i) ? 9 : 2);
-  const showName = t => t.i === ui.sel || (K >= 1.5 && t.area * K * K > 260) || (K >= 2.2 && isPlayer(t.i));
-  lbl.select(".nm").attr("font-size", fn).attr("y", t => base(t) + fn * .6).text(t => showName(t) ? tn(t.i).replace(/ 일대$/, "") : "")
+  const nameOf = t => tn(t.i).replace(/ 일대$/, "");
+  let showName = t => t.i === ui.sel || (K >= 1.5 && t.area * K * K > 260) || (K >= 2.2 && isPlayer(t.i));
+  let shown = want;
+  // touch screens draw labels larger, so they would pile up: place them by importance and drop what would overlap
+  if (ls > 1) {
+    const pri = t => t.i === ui.sel ? 1e9 : near(t) ? 1e8 : isPlayer(t.i) ? 1e7 + S.troops[t.i] : homes.has(t.i) ? 1e6 : S.troops[t.i] * (owner(t.i) < 0 ? 1 : 3) + t.area * K * K * 0.01;
+    const boxes = [], hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+    const on = new Set(), named = new Set();
+    for (const t of T.filter(want).sort((a, b) => pri(b) - pri(a))) {
+      const [x, y] = gproj(t.geoC), by = base(t);
+      const tb = [x - 12 * ls, y - 13 * ls, x + 13 * ls, y + by * ls];
+      if (hit(tb) && pri(t) < 1e8) continue;
+      boxes.push(tb); on.add(t.i);
+      if (!showName(t)) continue;
+      const lines = 1 + (K >= 2.5 ? 1 : 0), w = nameOf(t).length * fn * 0.95 * ls / 2;
+      const nb = [x - w, y + by * ls, x + w, y + (by + fn * 1.25 + (lines - 1) * fs * 1.2) * ls];
+      if (hit(nb) && t.i !== ui.sel) continue;
+      boxes.push(nb); named.add(t.i);
+    }
+    shown = t => on.has(t.i);
+    const sn = showName; showName = t => named.has(t.i) && sn(t);
+  }
+  lbl.attr("display", t => shown(t) ? null : "none")
+    .attr("transform", ls > 1 ? t => `translate(${gproj(t.geoC)}) scale(${ls})` : t => `translate(${gproj(t.geoC)})`).classed("neu", t => owner(t.i) < 0);
+  lbl.select(".nm").attr("font-size", fn).attr("y", t => base(t) + fn * .6).text(t => showName(t) ? nameOf(t) : "")
     .classed("mine", t => isPlayer(t.i));
   const below = t => base(t) + (showName(t) ? fn * 1.25 : 0);
   lbl.select(".l2").attr("font-size", fs).attr("y", t => below(t) + fs * .6);
   lbl.select(".l3").attr("font-size", fs).attr("y", t => below(t) + fs * 1.75);
-  lbl.select(".l2").text(t => K >= 2.5 && seenT(t.i) ? resName(T[t.i].spec) : "");
+  // on touch screens the resource and building lines only come with the name, which was checked for room
+  const extra = t => ls > 1 ? showName(t) : true;
+  lbl.select(".l2").text(t => K >= 2.5 && seenT(t.i) && extra(t) ? resName(T[t.i].spec) : "");
   lbl.select(".occ").text(t => { const oc = S.occ && S.occ[t.i]; return oc && seenT(t.i) ? `점령 ${oc.p}/${T[t.i].hold}` : ""; });
-  lbl.select(".l3").text(t => K >= 3.5 && seenT(t.i) && S.bld ? BLD.map((b, k) => lvl(t.i, k) ? `${bName(k)}${lvl(t.i, k)}` : "").filter(Boolean).join("·") : "");
+  lbl.select(".l3").text(t => K >= 3.5 && seenT(t.i) && S.bld && extra(t) ? BLD.map((b, k) => lvl(t.i, k) ? `${bName(k)}${lvl(t.i, k)}` : "").filter(Boolean).join("·") : "");
 }
 
 function render() {
@@ -1849,6 +1988,10 @@ function render() {
   const rtOn = S.mode === "rt" && S.phase === "ops" && S.net !== "guest";
   document.getElementById("endBtn").hidden = !(S.phase === "deploy" || S.phase === "ops") || S.mode === "rt";
   document.getElementById("pauseBtn").hidden = !rtOn;
+  // the start button also sits with the commands, so on a phone it is not buried below the map
+  const goOn = S.phase === "pick" && !S.net && ui.sel >= 0 && knownT(ui.sel);
+  document.getElementById("goBtn").hidden = !goOn;
+  if (goOn) document.getElementById("goBtn").textContent = `${C[T[ui.sel].c].ko}(으)로 작전 개시`;
   document.getElementById("pauseBtn").textContent = S.paused ? "▶ 재개" : "❚❚ 일시정지";
   document.getElementById("speedSeg").hidden = !rtOn;
   document.querySelectorAll("#speedSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.speed === S.speed)));
@@ -1863,7 +2006,7 @@ function guideText() {
   if (S.phase === "scenario") return "시나리오를 골라 전쟁을 시작하세요";
   if (S.phase === "lobby") return "대기실 · 세력을 고르고 시작을 기다리세요";
   if (S.net === "guest" && S.player < 0) return "관전 중 · 이번 판에는 세력이 배정되지 않았습니다";
-  if (S.phase === "pick") return s < 0 ? "① 지휘할 국가를 지도에서 클릭하세요" : "② 오른쪽의 '작전 개시' 버튼을 누르세요";
+  if (S.phase === "pick") return s < 0 ? "① 지휘할 국가를 지도에서 클릭하세요" : "② '작전 개시' 버튼을 누르세요";
   if (S.mode === "rt" && S.phase === "ops") {
     if (S.paused) return "일시정지 중 · 재개를 누르면 시간이 다시 흐릅니다";
     if (s >= 0 && isPlayer(s)) return "실시간 · 증원이 이 지역에 모입니다. 빨간 화살표 = 진격 · 초록 화살표 = 이동 · 회색 = 공격 불가 (거리만큼 며칠 걸림)";
@@ -1882,11 +2025,11 @@ function showRules(full) {
   <p><b style="color:var(--signal)">목표</b> · 세계 영토 가치의 절반을 차지하면 승리. 내 땅을 모두 잃으면 패배.</p>
   <p>${rt ? "" : `1. <b>증원</b> · 받은 병력을 내 땅에 눌러 배치하거나 '자동 배치'를 누릅니다.<br>`}${rt ? 1 : 2}. <b>내 땅을 누르면</b> 갈 수 있는 곳에 화살표가 뜹니다. 빨강은 공격, 초록은 이동.<br>${rt ? 2 : 3}. <b>화살표 끝 지역을 누르면</b> 출격합니다. 보낼 병력은 위쪽 25~100%(키보드 1~4).<br>${rt ? `3. <b>시간은 저절로</b> 흐르고 증원도 매일 들어옵니다. 급할 땐 일시정지.` : `4. <b>턴 종료</b>를 누르면 컴퓨터가 움직이고 다음 계절이 됩니다.`}</p>
   <p>적 위에 마우스를 올리면 예상 승률이 보입니다. 나머지는 하면서 익히면 됩니다.</p>
-  <div class="btnrow"><button type="button" class="primary" id="closeRules">시작하기</button><button type="button" id="fullRules">규칙 자세히</button></div>`;
+  <div class="btnrow"><button type="button" class="primary" id="closeRules">${S.phase === "scenario" ? "시나리오 고르기" : "시작하기"}</button><button type="button" id="fullRules">규칙 자세히</button></div>`;
     document.getElementById("overlay").hidden = false;
-    document.getElementById("closeRules").onclick = hideOverlay;
+    document.getElementById("closeRules").onclick = closeRulesBox;
     document.getElementById("fullRules").onclick = () => showRules(true);
-    document.getElementById("closeRules").focus();
+    document.getElementById("closeRules").focus({ preventScroll: true });   // focusing must not scroll a phone page away from the map
     bindBackdrop();
     return;
   }
@@ -1897,7 +2040,7 @@ function showRules(full) {
   <p><b style="color:var(--signal)">병력 이자</b> · 병력은 가만히 둬도 스스로 조금씩 불어납니다. 상한(영토 1곳당 20 + 40)의 절반일 때 가장 빨리 늘고, 상한에 가까워지면 거의 늘지 않습니다. 모아서 크게 칠지, 땅을 넓혀 상한을 올릴지 고르세요. 컴퓨터도 같은 규칙을 따릅니다.</p>
   <p><b style="color:var(--signal)">전격전</b> · ${S.mode === "rt" ? "3일 안에" : "한 턴 안에"} 연달아 점령하면 연승이 쌓여 다음 공격력이 10%씩, 최대 +50%까지 오릅니다. 공격에 한 번 실패하면 연승이 끊깁니다. 컴퓨터도 같은 규칙이지만 보너스가 난이도만큼 줄어듭니다(쉬움 60%, 보통 80%, 어려움 100%).</p>
   <p><b style="color:var(--signal)">진군 (실시간)</b> · 실시간 모드에서는 부대가 거리만큼 1~6일(바다 건너면 +1일) 걸려 이동합니다. 지도 위 행군 부대는 남은 길을 점선으로 보여 주고, 내 땅으로 오는 적은 <b style="color:var(--danger)">빨간 고리와 남은 일수</b>로 표시되며 경고가 뜹니다. 도착 전에 증원을 모아 막으세요. 도착했을 때 그 땅 주인과 싸우며, 그사이 ${fl().peace}을 맺었으면 되돌아옵니다. 컴퓨터도 똑같이 행군하고, 다가오는 적을 보고 대비합니다.</p>
-  <p><b style="color:var(--signal)">내정 · 건설</b> · 자원은 ${resName("f")}·${resName("m")}·${resName("g")}이고 지역마다 특산 자원이 있습니다. 내 지역을 고르면 ${fl().bld.map(([n, d]) => `${n}(${d})`).join(", ")}을(를) 지을 수 있습니다.</p>
+  <p><b style="color:var(--signal)">내정 · 건설</b> · 자원은 ${resName("f")}·${resName("m")}·${resName("g")}이고 지역마다 특산 자원이 있습니다. 내 지역을 고르면 ${fl().bld.map(([n, d]) => `${n}(${d})`).join(", ")}을(를) 지을 수 있습니다. <b style="color:var(--danger)">전쟁은 땅을 망칩니다</b>: 어느 지역에서든 전투가 벌어지면 이기든 지든 공격한 병력 크기만큼 그 지역 시설이 망가집니다. 병력 100 이상이면 시설이 모두 무너지고, 10 이상이면 모든 시설이 1단계씩 내려가고, 5 이상이면 가장 큰 시설 1곳이 1단계 내려가며, 5 미만은 피해가 없습니다(공격·수비, 컴퓨터 모두 같은 규칙). 시설은 전선 뒤 안정된 땅에 지으세요. 보급, 영토 확보, 영토 유지 순서가 나라를 키웁니다.</p>
   <p><b style="color:var(--signal)">내륙 자동 운영</b> · 적이나 빈 땅과 맞닿지 않은 내 지역(내륙)은 턴이 끝날 때 저절로 남는 자원으로 ${bName(0)}·${bName(3)}·${bName(1)}을 짓고(자원마다 ${AUTO_KEEP}은 남겨 둠), 병력을 가장 위급한 전선으로 보냅니다. 가까운 길은 한 턴에 이어서 가므로 수도에 병력이 놀지 않습니다. '내정·군대' 탭에서 끌 수 있습니다.</p>
   <p><b style="color:var(--signal)">국방 · 병기와 군대</b> · 병기는 ${fl().wpn.join(" → ")} 순으로 바꿀 수 있고 단계마다 공격력 +20%입니다. '${fl().rec}'로 인원을 늘리고, 15명당 매 턴 ${resName("f")} 1을 먹습니다. ${resName("f")}이 바닥나면 인원이 흩어집니다.</p>
   <p><b style="color:var(--signal)">지구본과 탐험</b> · 지도를 끌면 지구본이 돌고, 확대할수록 특산 자원과 시설까지 보입니다. 처음에는 내 땅 주변만 알고, 나머지는 '미지의 땅'입니다. 탐험 지식(${[1, 2, 3].map(expName).join(" → ")})을 익힐수록 더 멀리 보입니다.</p>
@@ -1911,13 +2054,13 @@ function showRules(full) {
   <p><b style="color:var(--signal)">바다</b> · 점선은 해상 항로입니다. 바다 건너 나라도 항로로 연결되면 공격할 수 있습니다.</p>
   <button type="button" class="primary" id="closeRules">알겠습니다</button>`;
   document.getElementById("overlay").hidden = false;
-  document.getElementById("closeRules").onclick = hideOverlay;
+  document.getElementById("closeRules").onclick = closeRulesBox;
   box.scrollTop = 0;
   bindBackdrop();
 }
 // a click on the dark backdrop closes the rules too (only the rules: other overlays need a choice)
 function bindBackdrop() {
-  document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) hideOverlay(); };
+  document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) closeRulesBox(); };
 }
 // ---- battle effects: arrows, explosions, flags planted, troop columns; all positioned on the globe every frame ----
 const RM = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -2040,6 +2183,7 @@ function drawArrows() {
     if (a.win && a.part) { if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: `진입 ${a.part}`, color: "#ffe08a", delay: delay + 640, dur: 1400 }); }
     else if (a.win) fx({ k: "flag", fid: a.att, at: T[a.tgt].geoC, txt: isBig ? "점령" : "", delay: delay + 620, dur: 1500 });
     else if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: "격퇴", color: "#ffb4a2", delay: delay + 640, dur: 1300 });
+    if (a.razed && isBig) fx({ k: "txt", at: [T[a.tgt].geoC[0], T[a.tgt].geoC[1] - 1.2], text: a.razed.startsWith("시설 모두") ? "🔥 시설 파괴" : "🔥 시설 피해", color: "#ff7a4d", delay: delay + 1100, dur: 1700 });
   }
   // captures that arrive without an arrow (network guests, merges, surrenders)
   if (lastOwners && lastOwners.length === N) {
@@ -2122,6 +2266,7 @@ function showReport(a) {
   el.innerHTML = `<div class="rp-h">전투 보고 · ${tn(a.tgt)}</div>
     <div class="rp-b">${side(A, a.a, A.name + (A.isPlayer ? " (나)" : ""))}<div class="vs">VS</div>${side(D, a.d, D ? D.name + (D.isPlayer ? " (나)" : "") : neutralName())}</div>
     <div class="rp-bar"><div style="width:${a.a / tot * 100}%;background:${a.color}"></div><div style="width:${a.d / tot * 100}%;background:${D ? (D.isPlayer ? PLAYER_COLOR : D.color) : "#9a947a"}"></div></div>
+    ${a.razed ? `<div class="rp-raze">🔥 ${a.razed}</div>` : ""}
     <div class="stamp ${ok ? "ok" : "bad"}">${label}</div>`;
   el.className = "report"; el.hidden = false;
   el.onclick = () => { el.hidden = true; };
@@ -2219,7 +2364,9 @@ sndPaint();
 // a small card that sits on the map next to the selected region
 function renderPop() {
   const el = document.getElementById("pop"), i = ui.sel;
-  if (i < 0 || !S || ["scenario", "lobby", "over"].includes(S.phase) || !knownT(i)) { el.hidden = true; return; }
+  if (i < 0 || !S || ["scenario", "lobby", "over"].includes(S.phase) || !knownT(i)) { el.hidden = true; popFor = -1; return; }
+  // a sideways phone shows the same card in the panel beside the map; here it would only cover the map
+  if (SIDEWAYS.matches) { el.hidden = true; if (TOUCH && i !== popFor) { popFor = i; zoomToTargets(i); } return; }
   const o = owner(i), live = S.phase === "deploy" || S.phase === "ops";
   let body = `<div class="row"><span>${o < 0 ? neutralFlag(18) : flagHTML(fac(o), 18)}${ownerName(o)}</span><b>${seenT(i) ? S.troops[i] + unit() : "?"}</b></div>`;
   if (seenT(i) && S.res) body += `<div class="row"><span>특산</span><b>${resName(T[i].spec)}</b></div>`;
@@ -2235,16 +2382,40 @@ function renderPop() {
   const st = el.querySelector("[data-popstart]"); if (st) st.onclick = () => startAs(i);
   el.querySelector("[data-popclose]").onclick = () => { ui.sel = -1; render(); };
   placePop();
+  if (PHONE.matches && ui.sel !== popFor) {
+    // a newly picked region hidden under the docked card (or off the visible globe) is turned to the middle
+    popFor = ui.sel;
+    const [px, py] = gproj(T[i].geoC), wr = wrap.getBoundingClientRect(), svgR = svg.node().getBoundingClientRect();
+    const sc = Math.min(svgR.width / VB.w, svgR.height / VB.h), y = svgR.top + (svgR.height - VB.h * sc) / 2 + (py - VB.y) * sc;
+    if (zoomToTargets(i)) return;
+    if (!facing(i) || y > el.getBoundingClientRect().top - 24 || y < wr.top + 70) turnTo(i);
+  }
 }
+let popFor = -1;
+// my own region on a touch screen: zoom in until its neighbours sit a fingertip apart, so the target can be tapped
+function zoomToTargets(i) {
+  if (!isPlayer(i) || !(S.phase === "deploy" || S.phase === "ops")) return false;
+  const svgR = svg.node().getBoundingClientRect(), sc = Math.min(svgR.width / VB.w, svgR.height / VB.h);
+  const pts = [...NB(i)].map(j => gproj(T[j].geoC));
+  let dmin = Infinity;
+  for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) dmin = Math.min(dmin, Math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]) * sc);
+  if (pts.length < 2 || dmin >= 44) return false;
+  svg.call(zoom.scaleTo, Math.min(6, K * 44 / Math.max(dmin, 6))); turnTo(i);
+  return true;
+}
+const PHONE = window.matchMedia ? matchMedia("(max-width: 560px)") : { matches: false };
+const SIDEWAYS = window.matchMedia ? matchMedia("(orientation: landscape) and (max-height: 500px) and (min-width: 561px)") : { matches: false };
 function placePop() {
   const el = document.getElementById("pop");
   if (el.hidden || ui.sel < 0) return;
+  el.classList.toggle("dock", PHONE.matches);
+  if (PHONE.matches) { el.style.visibility = ""; return; }
   if (!facing(ui.sel)) { el.style.visibility = "hidden"; return; }
   el.style.visibility = "";
   const svgR = svg.node().getBoundingClientRect(), wr = wrap.getBoundingClientRect();
-  const sc = Math.min(svgR.width / W, svgR.height / H), ox = (svgR.width - W * sc) / 2, oy = (svgR.height - H * sc) / 2;
+  const sc = Math.min(svgR.width / VB.w, svgR.height / VB.h), ox = (svgR.width - VB.w * sc) / 2, oy = (svgR.height - VB.h * sc) / 2;
   const [px, py] = gproj(T[ui.sel].geoC);
-  let x = svgR.left - wr.left + ox + px * sc + 16, y = svgR.top - wr.top + oy + py * sc - 20;
+  let x = svgR.left - wr.left + ox + (px - VB.x) * sc + 16, y = svgR.top - wr.top + oy + (py - VB.y) * sc - 20;
   const w = el.offsetWidth, h = el.offsetHeight;
   if (x + w > wr.width - 8) x = x - w - 32;
   x = Math.max(8, x); y = Math.max(52, Math.min(y, wr.height - h - 8));
@@ -2445,8 +2616,11 @@ function showEnd(win, why) {
   document.getElementById("againBtn").onclick = newGame;
 }
 function hideOverlay() { document.getElementById("overlay").hidden = true; }
+// closing the rules before a game has begun goes back to the scenario list, not to an empty map
+function closeRulesBox() { hideOverlay(); if (S && S.phase === "scenario") showScenarios(); }
 
 document.getElementById("endBtn").onclick = endTurn;
+document.getElementById("goBtn").onclick = () => { if (S.phase === "pick" && ui.sel >= 0) startAs(ui.sel); };
 document.getElementById("pauseBtn").onclick = () => { S.paused = !S.paused; toast(S.paused ? "일시정지" : "재개"); render(); persist(); };
 document.querySelectorAll("#speedSeg button").forEach(b => b.onclick = () => { S.speed = b.dataset.speed; startClock(); render(); persist(); });
 document.getElementById("autoBtn").onclick = () => { autoDeploy(); S.phase = "ops"; toast("전선 위주로 자동 배치했습니다."); render(); persist(); };
@@ -2462,7 +2636,7 @@ document.querySelectorAll("#pctSeg button").forEach(b => b.onclick = () => setPc
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     // Esc closes the rules sheet first; with nothing open it clears the selection
-    if (!document.getElementById("overlay").hidden) { if (document.getElementById("closeRules")) hideOverlay(); return; }
+    if (!document.getElementById("overlay").hidden) { if (document.getElementById("closeRules")) closeRulesBox(); return; }
     ui.sel = -1; render(); return;
   }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.altKey || e.metaKey) return;
