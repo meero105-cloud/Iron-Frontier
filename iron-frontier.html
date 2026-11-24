@@ -953,12 +953,14 @@ function startGroups(id, pick) {
 }
 function showScenarios() {
   const box = document.getElementById("overlayBox");
+  // online play needs claude.ai's room; on GitHub Pages, itch.io or in the app the button is gone, so an old choice of it falls back to turns
+  if (S.mode === "net" && !(window.claude && window.claude.use)) S.mode = "turn";
   const card = sc => `<button type="button" class="scenbtn" data-id="${sc.id}"><b>${sc.name}</b><em>${sc.level}</em><span>${sc.desc}</span></button>`;
   box.innerHTML = `<h2>시나리오 선택</h2><p>어느 시대에서 시작할지 고르세요. 어느 쪽을 골라도 모든 세력은 같은 조건에서 출발합니다.</p>
     <h3 class="scenh">모드</h3>
     <div class="modes">${Object.entries(DIFFS).map(([k, d]) => `<div class="modecard${S.diff === k && S.mode !== "net" ? " on" : ""}"><b>${d.name}</b><small>${d.short}</small>
       <div class="seg modeseg"><button type="button" data-diff="${k}" data-mode="turn" aria-pressed="${S.diff === k && S.mode === "turn"}">턴제</button><button type="button" data-diff="${k}" data-mode="rt" aria-pressed="${S.diff === k && S.mode === "rt"}">실시간</button></div></div>`).join("")}</div>
-    <div class="seg modeseg netseg"><button type="button" data-mode="net" aria-pressed="${S.mode === "net"}">온라인 대전 · 다른 유저와 실시간</button></div>
+    ${window.claude && window.claude.use ? `<div class="seg modeseg netseg"><button type="button" data-mode="net" aria-pressed="${S.mode === "net"}">온라인 대전 · 다른 유저와 실시간</button></div>` : ""}
     <p class="modehint"><b>${S.mode === "net" ? "온라인 대전" : `${dif().name} · ${S.mode === "rt" ? "실시간" : "턴제"}`}</b> · ${S.mode === "turn" ? "차례대로 진행합니다. 턴 종료를 누를 때까지 시간이 멈춰 있고, 공격하면 바로 전투합니다." : S.mode === "rt" ? "1초에 하루씩 흐릅니다. 부대는 거리만큼 며칠 걸려 진군하고, 다가오는 적이 지도에 보입니다." : roomApi ? "사람끼리는 모든 규칙이 같고, 빈 세력은 컴퓨터가 맡습니다(" + dif().name + " 기준). 아래 시나리오를 누르면 방을 만들고 코드가 나옵니다. 친구의 방에 들어가려면 코드를 입력하세요." : "이 화면에서는 네트워크 연결을 쓸 수 없습니다. claude.ai에 로그인한 상태에서 이 페이지를 열어 주세요."}${S.mode === "net" ? "" : ` 컴퓨터: ${dif().desc}`}</p>
     ${S.mode === "net" && roomApi ? `<div class="joinrow"><input id="joinCode" maxlength="8" placeholder="방 코드" autocomplete="off" aria-label="방 코드"><button type="button" id="joinBtn" class="primary">참가</button></div>` : ""}
     <h3 class="scenh">선사 · 고대</h3><div class="scen">${ERAS.map(card).join("")}</div>
