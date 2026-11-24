@@ -328,6 +328,7 @@ svg.moving .terr { transition: none; }
   transform: rotate(-12deg); opacity: .88; animation: stamp .42s .25s cubic-bezier(.3,1.6,.5,1) both; mix-blend-mode: multiply; background: rgba(255,255,255,.12); }
 .report .stamp.ok { color: #2f6b26; border-color: #2f6b26; }
 .report .stamp.bad { color: #a52a1a; border-color: #a52a1a; }
+.report .rp-raze { margin-top: 7px; padding: 3px 6px; font-size: 11.5px; font-weight: 700; color: #a52a1a; background: rgba(165, 42, 26, .1); border-left: 3px solid #a52a1a; }
 @keyframes stamp { from { transform: rotate(-12deg) scale(2.4); opacity: 0; } }
 .turnban { position: absolute; left: 0; right: 0; top: 40%; z-index: 4; pointer-events: none; text-align: center; padding: 12px 0;
   background: linear-gradient(90deg, transparent, rgba(12,14,9,.86) 18%, rgba(12,14,9,.86) 82%, transparent);
@@ -1232,6 +1233,11 @@ function doAction(fid, a) {
     if (fac(fid).isPlayer) addLog(`탐험 지식 '${expName(L + 1)}' 습득 · 더 먼 땅이 보입니다.`, "me");
     return `'${expName(L + 1)}' 습득`;
   }
+  if (a.k === "auto") {
+    if (!S.autoOff) S.autoOff = {};
+    if (S.autoOff[fid]) delete S.autoOff[fid]; else S.autoOff[fid] = true;
+    return autoOn(fid) ? "내륙 자동 운영을 켰습니다." : "내륙 자동 운영을 껐습니다.";
+  }
   if (a.k === "mkt") {
     const m = MARKET[a.op]; if (!m) return "";
     if (!canPay(fid, m[0])) return "자원이 부족합니다.";
@@ -1272,11 +1278,13 @@ function aiEcon(f) {
   const me = f.id, r = S.res[me], mine = owned(me);
   if (!mine.length) return;
   const front = mine.filter(i => enemyNbrs(i).some(j => owner(j) < 0 || !atPeace(me, owner(j))));
+  // battles tear buildings down, so the computer builds behind the front where it can (walls still go on the line)
+  const safe = mine.filter(i => !front.includes(i) && !incoming(i, me).length), base = safe.length ? safe : mine;
   for (let k = 0; k < 2; k++) {
     const roll = Math.random();
     let i, b;
-    if (roll < 0.4 && front.length) { i = front[Math.floor(Math.random() * front.length)]; b = 1; }
-    else if (roll < 0.8) { i = mine.slice().sort((x, y) => T[y].value - T[x].value)[Math.floor(Math.random() * Math.min(3, mine.length))]; b = Math.random() < 0.7 ? 0 : 3; }
+    if (roll < 0.4) { i = base[Math.floor(Math.random() * base.length)]; b = 1; }
+    else if (roll < 0.8) { i = base.slice().sort((x, y) => T[y].value - T[x].value)[Math.floor(Math.random() * Math.min(3, base.length))]; b = Math.random() < 0.7 ? 0 : 3; }
     else if (front.length) { i = front.slice().sort((x, y) => d3.sum(enemyNbrs(y), j => S.troops[j]) - d3.sum(enemyNbrs(x), j => S.troops[j]))[0]; b = 2; }
     if (i !== undefined && lvl(i, b) < BLD[b].max && canPay(me, BLD[b].cost(lvl(i, b) + 1))) doAction(me, { k: "build", s: i, b });
   }
@@ -1300,6 +1308,59 @@ function aiDiplomacy(f) {
       declareWar(me, g.id);
     }
   }
+}
+// ---- interior autopilot for people: regions that touch no rival are run by the governors ----
+// They build (production, market, barracks) out of spare resources and send their troops toward the front.
+// On by default; each person can switch it off. The computer already does the same in aiEcon/aiTurn.
+const autoOn = fid => humanF(fid) && !(S.autoOff && S.autoOff[fid]);
+// interior = every neighbour is mine or a peace partner (unclaimed land and enemies make a front)
+const isInterior = (i, fid = owner(i)) => fid >= 0 && owner(i) === fid && [...NB(i)].every(j => owner(j) === fid || atPeace(fid, owner(j)));
+const AUTO_KEEP = 15;   // the governors never spend a resource below this, so the player keeps money for their own plans
+function autoBuild(fid) {
+  const r = S.res[fid], inner = owned(fid).filter(i => isInterior(i, fid));
+  if (!inner.length) return [];
+  const keep = { f: Math.max(AUTO_KEEP, 3 * production(fid).upkeep), m: AUTO_KEEP, g: AUTO_KEEP };
+  const ok = c => Object.entries(c).every(([k, v]) => r[k] - v >= keep[k]);
+  const PRI = [0, 3, 1];   // production first, then market, then barracks (walls are useless away from the front)
+  const cand = [];
+  for (const i of inner) for (const b of PRI) if (lvl(i, b) < BLD[b].max) cand.push({ i, b, L: lvl(i, b) });
+  // spread out: the lowest level first, then by priority, then the richest region
+  cand.sort((x, y) => x.L - y.L || PRI.indexOf(x.b) - PRI.indexOf(y.b) || T[y.i].value - T[x.i].value);
+  const done = [];
+  for (const c of cand) {
+    if (done.length >= 2) break;
+    if (lvl(c.i, c.b) !== c.L || !ok(BLD[c.b].cost(c.L + 1))) continue;
+    pay(fid, BLD[c.b].cost(c.L + 1)); S.bld[c.i][c.b]++;
+    done.push(`${tn(c.i)} ${bName(c.b)} ${c.L + 1}단계`);
+  }
+  return done;
+}
+// march interior troops one road at a time toward the nearest front, the most threatened front first.
+// In turn-based play a short hop is instant and the troops may go on from the next region, so they reach the front the same turn.
+function autoSupply(fid) {
+  const mine = owned(fid), front = mine.filter(i => !isInterior(i, fid));
+  if (!front.length || front.length === mine.length) return 0;
+  const threat = i => d3.sum(enemyNbrs(i).filter(j => owner(j) >= 0 && !atPeace(fid, owner(j))), j => S.troops[j]) + d3.sum(incoming(i, fid), m => m.n) - S.troops[i];
+  const dist = new Map(), next = new Map(), q = front.slice().sort((x, y) => threat(y) - threat(x));
+  for (const i of q) dist.set(i, 0);
+  for (let h = 0; h < q.length; h++) {
+    const i = q[h];
+    for (const j of NB(i)) if (owner(j) === fid && !dist.has(j)) { dist.set(j, dist.get(i) + 1); next.set(j, i); q.push(j); }
+  }
+  let sent = 0;
+  const inner = mine.filter(i => next.has(i)).sort((x, y) => dist.get(y) - dist.get(x));
+  for (const i of inner) {
+    if (S.acted[i] || S.troops[i] < 3) continue;
+    sent += move(i, next.get(i), 1, true);
+  }
+  return sent;
+}
+function autoTurn(fid) {
+  if (!autoOn(fid) || !fac(fid).alive) return;
+  const rt = S.mode === "rt", tick = !rt || S.turn % TF() === 0;   // real time: every five days, so the map is not full of tiny columns
+  if (!tick) return;
+  const built = S.res ? autoBuild(fid) : [], sent = autoSupply(fid);
+  if (fac(fid).isPlayer && (built.length || sent)) addLog(`내륙 자동 운영 · ${[built.length ? `건설: ${built.join(", ")}` : "", sent ? `전선 보급 ${sent}${unit()}` : ""].filter(Boolean).join(" · ")}`, "me");
 }
 function econTurn() {
   S.offers = S.offers.filter(o => S.turn - o.t <= 5 * TF() && fac(o.from).alive && fac(o.to).alive);
@@ -1340,13 +1401,13 @@ const travelDays = (s, t) => S.mode === "rt" ? Math.max(1, Math.min(6, Math.roun
 const travelTurns = (s, t) => { const km = dist(s, t) * 6371, sea = T[s].sea.has(t) && !T[s].land.has(t); return Math.min(4, Math.min(3, Math.max(1, Math.ceil(km / 1200))) + (sea && km > 600 ? 1 : 0)); };
 const dUnit = () => S.mode === "rt" ? "일" : "턴";
 const incoming = (i, notF) => marches().filter(m => m.t === i && m.f !== notF);
-function launch(src, tgt, n, k) {
+function launch(src, tgt, n, k, quiet) {
   const f = owner(src), days = travelDays(src, tgt);
   S.troops[src] -= n;
   S.marchN = (S.marchN || 0) + 1;
   const m = { id: S.marchN, f, s: src, t: tgt, n, d0: S.turn, d1: S.turn + days, k };
   marches().push(m);
-  if (fac(f).isPlayer) addLog(`${tn(src)} → ${tn(tgt)} ${n}${unit()} ${k === "atk" ? "진격" : "이동"} 출발 · ${days}${dUnit()} 후 도착`, "me");
+  if (fac(f).isPlayer) { if (!quiet) addLog(`${tn(src)} → ${tn(tgt)} ${n}${unit()} ${k === "atk" ? "진격" : "이동"} 출발 · ${days}${dUnit()} 후 도착`, "me"); }
   else warnMarch(m);
   return m;
 }
@@ -1378,13 +1439,29 @@ function attack(src, tgt, pct = 1) {
   S.troops[src] -= a;
   return resolveAttack(owner(src), src, tgt, a);
 }
+// war damages the buildings of region i by the size of the attacking army n:
+// 100+ tears everything down, 10+ drops every building a level, 5+ hits the biggest one, fewer does no harm.
+// Returns what happened ("시설 모두 파괴 · 시장 2 · 성채 1") or "" when nothing was lost.
+const RAZE_ALL = 100, RAZE_LVL = 10, RAZE_ONE = 5;
+function raze(i, n) {
+  if (!S.bld || !S.bld[i] || !S.bld[i].some(x => x) || n < RAZE_ONE) return "";
+  const b = S.bld[i], was = b.slice();
+  if (n >= RAZE_ALL) b.fill(0);
+  else if (n >= RAZE_LVL) b.forEach((L, k) => { if (L) b[k] = L - 1; });
+  else { const k = d3.maxIndex(b); b[k]--; }
+  const lost = was.map((L, k) => L !== b[k] ? `${bName(k)} ${L}→${b[k]}` : "").filter(Boolean).join(" · ");
+  return `${n >= RAZE_ALL ? "시설 모두 파괴" : n >= RAZE_LVL ? "시설 1단계씩 하락" : "시설 1곳 피해"} · ${lost}`;
+}
 function resolveAttack(att, src, tgt, a) {
   const def = owner(tgt), d = S.troops[tgt];
   const r = battle(atkStr(att, tgt, a), d, defMul(tgt));
   if (r.win) r.left = Math.min(a, r.left);
   const mine = fac(att).isPlayer, vsMe = def >= 0 && fac(def).isPlayer;
-  arrows.push({ src, tgt, att, def, a, d, mine, vsMe, color: mine ? PLAYER_COLOR : fac(att).color, win: r.win });
+  // war ruins a land: a battle damages the region's buildings by the size of the attack, whoever wins
+  r.razed = raze(tgt, a);
+  arrows.push({ src, tgt, att, def, a, d, mine, vsMe, color: mine ? PLAYER_COLOR : fac(att).color, win: r.win, razed: r.razed });
   const who = fac(att).name, where = tn(tgt);
+  if (r.razed && (mine || vsMe || seenT(tgt))) addLog(`${where} 전화(戰火) · ${r.razed}`, mine || vsMe ? "bad" : "");
   if (!S.combo) S.combo = {};
   S.combo[att] = r.win ? { n: comboOf(att) + 1, t: S.turn } : null;
   r.combo = r.win ? S.combo[att].n : 0;
@@ -1404,7 +1481,6 @@ function resolveAttack(att, src, tgt, a) {
     }
     delete S.occ[tgt];
     S.owners[tgt] = att; S.troops[tgt] = r.left; S.acted[tgt] = true;
-    if (S.bld && S.bld[tgt][2] > 0) S.bld[tgt][2]--;   // walls are damaged in the assault
     const capital = def >= 0 && fac(def).home === tgt;
     if (mine || vsMe || seenT(tgt)) addLog(`${who}, ${where} 점령${capital ? " · 수도 함락" : ""} (${a} 대 ${d})`, mine ? "me" : vsMe ? "bad" : "");
     // losing a capital shakes everyone: the whole army if it was the faction's seat, else the rest of that country
@@ -1420,10 +1496,10 @@ function resolveAttack(att, src, tgt, a) {
   }
   return r;
 }
-function move(src, tgt, pct = 1) {
+function move(src, tgt, pct = 1, quiet = false) {
   const n = sendN(src, pct);
-  if (S.mode === "rt") { launch(src, tgt, n, "mv"); return n; }
-  if (travelTurns(src, tgt) > 1) { S.acted[src] = true; launch(src, tgt, n, "mv"); return n; }
+  if (S.mode === "rt") { launch(src, tgt, n, "mv", quiet); return n; }
+  if (travelTurns(src, tgt) > 1) { S.acted[src] = true; launch(src, tgt, n, "mv", quiet); return n; }
   S.troops[tgt] += n; S.troops[src] -= n; S.acted[src] = true;   // each region sends once a turn; the troops that arrive can go on
   return n;
 }
@@ -1476,6 +1552,7 @@ function endTurn() {
   const rt = S.mode === "rt";
   if (S.pool > 0) rt ? rtDeploy() : autoDeploy();
   if (!rt) ui.sel = -1;
+  for (const f of S.factions) if (f.alive && humanF(f.id)) autoTurn(f.id);
   S.acted.fill(false);
   marchTick();   // armies on a long road arrive (turn-based too)
   for (const f of S.factions) if (!f.isPlayer && !f.human && f.alive) aiTurn(f);
@@ -1963,7 +2040,8 @@ function showRules(full) {
   <p><b style="color:var(--signal)">병력 이자</b> · 병력은 가만히 둬도 스스로 조금씩 불어납니다. 상한(영토 1곳당 20 + 40)의 절반일 때 가장 빨리 늘고, 상한에 가까워지면 거의 늘지 않습니다. 모아서 크게 칠지, 땅을 넓혀 상한을 올릴지 고르세요. 컴퓨터도 같은 규칙을 따릅니다.</p>
   <p><b style="color:var(--signal)">전격전</b> · ${S.mode === "rt" ? "3일 안에" : "한 턴 안에"} 연달아 점령하면 연승이 쌓여 다음 공격력이 10%씩, 최대 +50%까지 오릅니다. 공격에 한 번 실패하면 연승이 끊깁니다. 컴퓨터도 같은 규칙이지만 보너스가 난이도만큼 줄어듭니다(쉬움 60%, 보통 80%, 어려움 100%).</p>
   <p><b style="color:var(--signal)">진군 (실시간)</b> · 실시간 모드에서는 부대가 거리만큼 1~6일(바다 건너면 +1일) 걸려 이동합니다. 지도 위 행군 부대는 남은 길을 점선으로 보여 주고, 내 땅으로 오는 적은 <b style="color:var(--danger)">빨간 고리와 남은 일수</b>로 표시되며 경고가 뜹니다. 도착 전에 증원을 모아 막으세요. 도착했을 때 그 땅 주인과 싸우며, 그사이 ${fl().peace}을 맺었으면 되돌아옵니다. 컴퓨터도 똑같이 행군하고, 다가오는 적을 보고 대비합니다.</p>
-  <p><b style="color:var(--signal)">내정 · 건설</b> · 자원은 ${resName("f")}·${resName("m")}·${resName("g")}이고 지역마다 특산 자원이 있습니다. 내 지역을 고르면 ${fl().bld.map(([n, d]) => `${n}(${d})`).join(", ")}을(를) 지을 수 있습니다.</p>
+  <p><b style="color:var(--signal)">내정 · 건설</b> · 자원은 ${resName("f")}·${resName("m")}·${resName("g")}이고 지역마다 특산 자원이 있습니다. 내 지역을 고르면 ${fl().bld.map(([n, d]) => `${n}(${d})`).join(", ")}을(를) 지을 수 있습니다. <b style="color:var(--danger)">전쟁은 땅을 망칩니다</b>: 어느 지역에서든 전투가 벌어지면 이기든 지든 공격한 병력 크기만큼 그 지역 시설이 망가집니다. 병력 100 이상이면 시설이 모두 무너지고, 10 이상이면 모든 시설이 1단계씩 내려가고, 5 이상이면 가장 큰 시설 1곳이 1단계 내려가며, 5 미만은 피해가 없습니다(공격·수비, 컴퓨터 모두 같은 규칙). 시설은 전선 뒤 안정된 땅에 지으세요. 보급, 영토 확보, 영토 유지 순서가 나라를 키웁니다.</p>
+  <p><b style="color:var(--signal)">내륙 자동 운영</b> · 적이나 빈 땅과 맞닿지 않은 내 지역(내륙)은 턴이 끝날 때 저절로 남는 자원으로 ${bName(0)}·${bName(3)}·${bName(1)}을 짓고(자원마다 ${AUTO_KEEP}은 남겨 둠), 병력을 가장 위급한 전선으로 보냅니다. 가까운 길은 한 턴에 이어서 가므로 수도에 병력이 놀지 않습니다. '내정·군대' 탭에서 끌 수 있습니다.</p>
   <p><b style="color:var(--signal)">국방 · 병기와 군대</b> · 병기는 ${fl().wpn.join(" → ")} 순으로 바꿀 수 있고 단계마다 공격력 +20%입니다. '${fl().rec}'로 인원을 늘리고, 15명당 매 턴 ${resName("f")} 1을 먹습니다. ${resName("f")}이 바닥나면 인원이 흩어집니다.</p>
   <p><b style="color:var(--signal)">지구본과 탐험</b> · 지도를 끌면 지구본이 돌고, 확대할수록 특산 자원과 시설까지 보입니다. 처음에는 내 땅 주변만 알고, 나머지는 '미지의 땅'입니다. 탐험 지식(${[1, 2, 3].map(expName).join(" → ")})을 익힐수록 더 멀리 보입니다.</p>
   <p><b style="color:var(--signal)">외교</b> · ${fl().peace}(서로 공격 안 함), ${fl().merge}(약한 우방을 통째로 합침), 항복 요구(훨씬 약한 적의 땅을 받음), ${fl().war}. 관계를 일찍 깨면 신뢰도가 떨어집니다.</p>
@@ -2107,6 +2185,7 @@ function drawArrows() {
     if (a.win && a.part) { if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: `진입 ${a.part}`, color: "#ffe08a", delay: delay + 640, dur: 1400 }); }
     else if (a.win) fx({ k: "flag", fid: a.att, at: T[a.tgt].geoC, txt: isBig ? "점령" : "", delay: delay + 620, dur: 1500 });
     else if (isBig) fx({ k: "txt", at: T[a.tgt].geoC, text: "격퇴", color: "#ffb4a2", delay: delay + 640, dur: 1300 });
+    if (a.razed && isBig) fx({ k: "txt", at: [T[a.tgt].geoC[0], T[a.tgt].geoC[1] - 1.2], text: a.razed.startsWith("시설 모두") ? "🔥 시설 파괴" : "🔥 시설 피해", color: "#ff7a4d", delay: delay + 1100, dur: 1700 });
   }
   // captures that arrive without an arrow (network guests, merges, surrenders)
   if (lastOwners && lastOwners.length === N) {
@@ -2240,6 +2319,7 @@ function showReport(a) {
   el.innerHTML = `<div class="rp-h">전투 보고 · ${tn(a.tgt)}</div>
     <div class="rp-b">${side(A, a.a, A.name + (A.isPlayer ? " (나)" : ""))}<div class="vs">VS</div>${side(D, a.d, D ? D.name + (D.isPlayer ? " (나)" : "") : neutralName())}</div>
     <div class="rp-bar"><div style="width:${a.a / tot * 100}%;background:${a.color}"></div><div style="width:${a.d / tot * 100}%;background:${D ? (D.isPlayer ? PLAYER_COLOR : D.color) : "#9a947a"}"></div></div>
+    ${a.razed ? `<div class="rp-raze">🔥 ${a.razed}</div>` : ""}
     <div class="stamp ${ok ? "ok" : "bad"}">${label}</div>`;
   el.className = "report"; el.hidden = false;
   el.onclick = () => { el.hidden = true; };
@@ -2425,9 +2505,10 @@ function renderSel() {
     return;
   }
   if (isPlayer(i)) {
-    if (S.phase === "deploy") hint = `클릭할 때마다 이곳에 병력 <strong>+${ui.step > 99 ? "전부" : ui.step}</strong>을 배치합니다.`;
-    else if (!canLaunch(i)) hint = S.acted[i] ? "이번 턴에 이미 병력을 보낸 지역입니다(지역마다 턴당 1번). 흐린 화살표는 다음 턴에 갈 수 있는 곳입니다." : "병력이 1뿐이라 출격할 수 없습니다. 흐린 화살표는 병력을 채우면 갈 수 있는 곳입니다.";
-    else hint = `<strong>빨간 화살표</strong> 지역을 클릭하면 ${sendN(i, ui.pct)}${unit()}(${Math.round(ui.pct * 100)}%)으로 공격, <strong>초록 화살표</strong>는 아군 지역으로 이동합니다(지역마다 턴당 1번, 도착한 병력은 그 지역에서 다시 보낼 수 있음). 회색은 ${fl().peace} 상대라 공격할 수 없습니다. 비율은 위쪽 버튼이나 키보드 1~4로 바꿉니다.`;
+    if (autoOn(S.player) && isInterior(i, S.player)) hint = `<b>내륙</b> · 자동 운영 중: 턴이 끝날 때 남는 자원으로 건설하고 병력을 전선으로 보냅니다. `;
+    if (S.phase === "deploy") hint += `클릭할 때마다 이곳에 병력 <strong>+${ui.step > 99 ? "전부" : ui.step}</strong>을 배치합니다.`;
+    else if (!canLaunch(i)) hint += S.acted[i] ? "이번 턴에 이미 병력을 보낸 지역입니다(지역마다 턴당 1번). 흐린 화살표는 다음 턴에 갈 수 있는 곳입니다." : "병력이 1뿐이라 출격할 수 없습니다. 흐린 화살표는 병력을 채우면 갈 수 있는 곳입니다.";
+    else hint += `<strong>빨간 화살표</strong> 지역을 클릭하면 ${sendN(i, ui.pct)}${unit()}(${Math.round(ui.pct * 100)}%)으로 공격, <strong>초록 화살표</strong>는 아군 지역으로 이동합니다(지역마다 턴당 1번, 도착한 병력은 그 지역에서 다시 보낼 수 있음). 회색은 ${fl().peace} 상대라 공격할 수 없습니다. 비율은 위쪽 버튼이나 키보드 1~4로 바꿉니다.`;
   } else hint = "아군 지역을 먼저 선택한 뒤 이 지역을 클릭하면 공격합니다.";
   const live = S.phase === "deploy" || S.phase === "ops";
   const build = isPlayer(i) && live && S.res ? `<h4 class="sub">건설 (내정)</h4><div class="blds">${BLD.map((b, k) => {
@@ -2467,6 +2548,9 @@ function renderMe() {
     <div class="wpns">${[0, 1, 2, 3].map(k => `<span class="${k <= S.tech[S.player] ? "on" : ""}">${expName(k)}</span>`).join("<i>›</i>")}</div>
     <div class="hint">${S.tech[S.player] >= 3 ? "온 세상이 지도에 보입니다." : `지금은 내 땅에서 ${SIGHT[S.tech[S.player]]}칸 떨어진 곳까지 보입니다. 한 번 본 땅은 지도에 남지만 병력은 '?'로 보입니다.`}</div>
     ${S.tech[S.player] < 3 ? `<div class="btnrow"><button type="button" data-exp="1" ${live && canPay(S.player, EXP_COST[S.tech[S.player]]) ? "" : "disabled"}>'${expName(S.tech[S.player] + 1)}' 익히기 · ${costText(EXP_COST[S.tech[S.player]])}</button></div>` : ""}
+    <h4 class="sub">내륙 자동 운영</h4>
+    <div class="hint">적과 맞닿지 않은 내 지역 <b>${mine.filter(i => isInterior(i, S.player)).length}곳</b>은 ${autoOn(S.player) ? "총독이 알아서" : "자동 운영을 켜면"} 남는 자원으로 ${bName(0)}·${bName(3)}·${bName(1)}을 짓고(자원마다 ${AUTO_KEEP}은 남김), 병력을 가장 위급한 전선으로 보냅니다. 국경 지역은 직접 지휘하세요.</div>
+    <div class="btnrow"><button type="button" data-auto="1" ${live ? "" : "disabled"}>${autoOn(S.player) ? "켜짐 · 끄기" : "꺼짐 · 켜기"}</button></div>
     <h4 class="sub">병기 (국방)</h4>
     <div class="wpns">${fl().wpn.map((w, k) => `<span class="${k <= S.wpn[S.player] ? "on" : ""}">${w}</span>`).join("<i>›</i>")}</div>
     <div class="hint">지금 병기: <strong>${fl().wpn[S.wpn[S.player]]}</strong> · 공격력 +${S.wpn[S.player] * 20}%. 상대 병기가 좋으면 그만큼 상쇄됩니다.</div>
@@ -2478,6 +2562,7 @@ function renderMe() {
     <h4 class="sub">${fl().market} (무역)</h4>
     <div class="btnrow">${Object.keys(MARKET).map(op => `<button type="button" data-mkt="${op}" ${live && canPay(S.player, MARKET[op][0]) ? "" : "disabled"}>${mktLabel(op)}</button>`).join("")}</div>` : ""}`;
   el.querySelectorAll("[data-wpn]").forEach(b => b.onclick = () => cmd({ k: "wpn" }));
+  el.querySelectorAll("[data-auto]").forEach(b => b.onclick = () => cmd({ k: "auto" }));
   el.querySelectorAll("[data-exp]").forEach(b => b.onclick = () => cmd({ k: "exp" }));
   el.querySelectorAll("[data-rec]").forEach(b => b.onclick = () => cmd({ k: "rec", n: +b.dataset.rec }));
   el.querySelectorAll("[data-mkt]").forEach(b => b.onclick = () => cmd({ k: "mkt", op: b.dataset.mkt }));
@@ -2781,7 +2866,7 @@ function applyState(d) {
 function hostAct(m) {
   const fid = NET.seats[m.peer], d = m.data || {};
   if (!Number.isInteger(fid) || S.phase !== "ops" || S.paused) return;
-  if (["build", "rec", "mkt", "dip", "ans", "wpn", "exp"].includes(d.k)) {
+  if (["build", "rec", "mkt", "dip", "ans", "wpn", "exp", "auto"].includes(d.k)) {
     doAction(fid, { k: d.k, s: d.s, b: d.b, n: d.n, op: d.op, to: d.to, id: d.id, yes: !!d.yes, at: NET.focus[fid] });
     render(); broadcast(); return;
   }
