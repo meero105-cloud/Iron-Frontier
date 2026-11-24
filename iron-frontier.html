@@ -386,6 +386,43 @@ svg.moving .terr { transition: none; }
   .mapwrap { height: calc(100vh - 46px - var(--cmdH) - 64px); height: calc(100dvh - 46px - var(--cmdH) - 64px); min-height: 300px; }
   .side { padding-bottom: calc(var(--cmdH) + 12px); }
   .bar .stat b, .menu button, .chip { white-space: nowrap; }
+  /* fingers, not a mouse: every button at least about 40px, panel text about 12-13px */
+  .menu button { min-height: 40px; min-width: 40px; }
+  .tabs button { min-height: 44px; padding: 10px 12px; font-size: 13.5px; }
+  .side, .overlay .box, .report { zoom: 1.1; }
+  .legend { font-size: 12px; }
+  .pickbanner { left: 8px; right: 8px; transform: none; width: auto; max-width: none; font-size: 13.5px; }
+  /* the selected region's card docks along the bottom of the map so it never covers the targets around it */
+  .pop.dock { left: 8px !important; right: 8px; top: auto !important; bottom: 8px; width: auto; font-size: 13.5px; padding: 9px 12px 11px; }
+  .pop.dock h4 { font-size: 17px; }
+  .pop.dock .x { min-width: 40px; min-height: 36px; font-size: 20px; }
+  .pop.dock .popb { grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .pop.dock .popb button, .pop.dock > button { font-size: 13px; min-height: 40px; padding: 6px 4px; }
+  .pop.dock .hint { font-size: 13px; }
+  .lbl .tok { pointer-events: auto; cursor: pointer; }
+  /* the instruction strip wraps to two lines here, so notices drop below it */
+  .toast, .report { top: 88px; }
+}
+/* phones held sideways: height is what is scarce, so the bar is one thin row and the panel sits beside the map */
+@media (orientation: landscape) and (max-height: 500px) and (min-width: 561px) {
+  .app { height: 100%; }
+  body { overflow: hidden; }
+  .main { grid-template-columns: minmax(0, 1fr) 300px; }
+  .mapwrap { height: auto; }
+  .side { overflow: auto; border-top: 0; border-left: 2px solid #0e100a; padding-left: 12px; }
+  .bar { flex-wrap: nowrap; gap: 6px; padding-block: 4px; }
+  .brand > div, .stat span, #turnStat, .spacer, .legend { display: none; }
+  .controls, .menu { flex-wrap: nowrap; gap: 5px; }
+  .menu { margin-left: auto; }
+  .menu .dk { display: none; }
+  .menu .ph { display: inline; font-weight: 700; }
+  .controls button, .seg button, .menu button { min-height: 40px; min-width: 40px; padding: 6px 9px; font-size: 13px; white-space: nowrap; }
+  .controls .seg button { min-width: 44px; }
+  .tabs { flex-wrap: nowrap; }
+  .tabs button { min-height: 40px; font-size: 13px; padding: 8px 8px; white-space: nowrap; }
+  .side, .report { zoom: 1.05; }
+  .pickbanner { font-size: 12.5px; top: 8px; }
+  .lbl .tok { pointer-events: auto; cursor: pointer; }
 }
 /* small phones: the emblem gives its room to the date and the menu */
 @media (max-width: 380px) {
@@ -1649,6 +1686,8 @@ const routeG = root.append("g").attr("pointer-events", "none");
 // ---- unit counters: a stack of tokens per region, nation flag on capitals ----
 const lbl = root.append("g").selectAll("g").data(T).join("g").attr("class", "lbl");
 const tok = lbl.append("g").attr("class", "tok");
+// on a phone many regions are smaller than a fingertip, so the counter on top of a region selects it too
+tok.on("click", (e, t) => { if (!TOUCH) return; e.stopPropagation(); tip.hidden = true; onClick(t.i); });
 const flagG = tok.append("g").attr("class", "fl");
 flagG.append("line").attr("class", "pole").attr("x1", -10).attr("y1", -6).attr("x2", -10).attr("y2", -25);
 flagG.append("use").attr("x", -10).attr("y", -25).attr("width", 15).attr("height", 10);
@@ -1742,6 +1781,10 @@ function redraw() {
 const center = () => gproj.invert([W / 2, H / 2]);
 // the map box follows the screen: on a tall phone the 960x470 table is cropped around the globe so it fills the width
 let VB = { x: 0, y: 0, w: W, h: H };
+// on a touch screen the counters and names are drawn larger, so a number reads at about 11px instead of 6px
+const TOUCH = !!(window.matchMedia && matchMedia("(pointer: coarse)").matches);
+let LS0 = 1;
+const LS = () => LS0 > 1 ? LS0 * Math.min(1.5, 1 + (K - 1) * 0.1) : 1;
 function fitView() {
   const r = svg.node().getBoundingClientRect();
   if (!r.width || !r.height) return;
@@ -1750,7 +1793,9 @@ function fitView() {
   const w = Math.min(W, Math.max(500, W * a)), h = w / a;
   VB = a >= W / H ? { x: 0, y: 0, w: W, h: H } : { x: (W - w) / 2, y: (H - h) / 2, w, h };
   svg.attr("viewBox", `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
+  LS0 = TOUCH ? Math.max(1, 1.45 / (Math.min(r.width / VB.w, r.height / VB.h))) : 1;
   roseG.attr("transform", `translate(${VB.x + VB.w - 44},${VB.y + VB.h - 46})`);
+  if (S) placeLabels();
   placePop();
 }
 if (window.ResizeObserver) new ResizeObserver(fitView).observe(document.getElementById("mapwrap")); else addEventListener("resize", fitView);
@@ -1759,23 +1804,47 @@ const facing = i => d3.geoDistance(T[i].geoC, center()) < 1.45;
 function placeLabels() {
   if (!S) return;
   const c = center(), homes = new Set(S.factions.map(f => f.home));
-  lbl.attr("display", t => {
-    if (!knownT(t.i) || d3.geoDistance(t.geoC, c) > 1.45) return "none";
-    const near = ui.sel >= 0 && NB(ui.sel).has(t.i);
-    return (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near || homes.has(t.i) || (S.occ && S.occ[t.i]) || (K >= 2 && isPlayer(t.i))) ? null : "none";
-  }).attr("transform", t => `translate(${gproj(t.geoC)})`).classed("neu", t => owner(t.i) < 0);
+  const ls = LS();
+  const near = t => ui.sel >= 0 && NB(ui.sel).has(t.i);
+  const want = t => knownT(t.i) && d3.geoDistance(t.geoC, c) <= 1.45 &&
+    (t.area * K * K > (owner(t.i) < 0 ? 260 : 120) || t.i === ui.sel || near(t) || homes.has(t.i) || (S.occ && S.occ[t.i]) || (K >= 2 && isPlayer(t.i)));
   // the closer you zoom, the more you see: names, then specialty resource, then buildings
   const fs = Math.min(11, 6.5 + K * 0.45), fn = Math.min(12.5, 7.5 + K * 0.65);
   const base = t => 6.5 * tokScale(t.i) + (seenT(t.i) ? 9 : 2);
-  const showName = t => t.i === ui.sel || (K >= 1.5 && t.area * K * K > 260) || (K >= 2.2 && isPlayer(t.i));
-  lbl.select(".nm").attr("font-size", fn).attr("y", t => base(t) + fn * .6).text(t => showName(t) ? tn(t.i).replace(/ 일대$/, "") : "")
+  const nameOf = t => tn(t.i).replace(/ 일대$/, "");
+  let showName = t => t.i === ui.sel || (K >= 1.5 && t.area * K * K > 260) || (K >= 2.2 && isPlayer(t.i));
+  let shown = want;
+  // touch screens draw labels larger, so they would pile up: place them by importance and drop what would overlap
+  if (ls > 1) {
+    const pri = t => t.i === ui.sel ? 1e9 : near(t) ? 1e8 : isPlayer(t.i) ? 1e7 + S.troops[t.i] : homes.has(t.i) ? 1e6 : S.troops[t.i] * (owner(t.i) < 0 ? 1 : 3) + t.area * K * K * 0.01;
+    const boxes = [], hit = b => boxes.some(o => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+    const on = new Set(), named = new Set();
+    for (const t of T.filter(want).sort((a, b) => pri(b) - pri(a))) {
+      const [x, y] = gproj(t.geoC), by = base(t);
+      const tb = [x - 12 * ls, y - 13 * ls, x + 13 * ls, y + by * ls];
+      if (hit(tb) && pri(t) < 1e8) continue;
+      boxes.push(tb); on.add(t.i);
+      if (!showName(t)) continue;
+      const lines = 1 + (K >= 2.5 ? 1 : 0), w = nameOf(t).length * fn * 0.95 * ls / 2;
+      const nb = [x - w, y + by * ls, x + w, y + (by + fn * 1.25 + (lines - 1) * fs * 1.2) * ls];
+      if (hit(nb) && t.i !== ui.sel) continue;
+      boxes.push(nb); named.add(t.i);
+    }
+    shown = t => on.has(t.i);
+    const sn = showName; showName = t => named.has(t.i) && sn(t);
+  }
+  lbl.attr("display", t => shown(t) ? null : "none")
+    .attr("transform", ls > 1 ? t => `translate(${gproj(t.geoC)}) scale(${ls})` : t => `translate(${gproj(t.geoC)})`).classed("neu", t => owner(t.i) < 0);
+  lbl.select(".nm").attr("font-size", fn).attr("y", t => base(t) + fn * .6).text(t => showName(t) ? nameOf(t) : "")
     .classed("mine", t => isPlayer(t.i));
   const below = t => base(t) + (showName(t) ? fn * 1.25 : 0);
   lbl.select(".l2").attr("font-size", fs).attr("y", t => below(t) + fs * .6);
   lbl.select(".l3").attr("font-size", fs).attr("y", t => below(t) + fs * 1.75);
-  lbl.select(".l2").text(t => K >= 2.5 && seenT(t.i) ? resName(T[t.i].spec) : "");
+  // on touch screens the resource and building lines only come with the name, which was checked for room
+  const extra = t => ls > 1 ? showName(t) : true;
+  lbl.select(".l2").text(t => K >= 2.5 && seenT(t.i) && extra(t) ? resName(T[t.i].spec) : "");
   lbl.select(".occ").text(t => { const oc = S.occ && S.occ[t.i]; return oc && seenT(t.i) ? `점령 ${oc.p}/${T[t.i].hold}` : ""; });
-  lbl.select(".l3").text(t => K >= 3.5 && seenT(t.i) && S.bld ? BLD.map((b, k) => lvl(t.i, k) ? `${bName(k)}${lvl(t.i, k)}` : "").filter(Boolean).join("·") : "");
+  lbl.select(".l3").text(t => K >= 3.5 && seenT(t.i) && S.bld && extra(t) ? BLD.map((b, k) => lvl(t.i, k) ? `${bName(k)}${lvl(t.i, k)}` : "").filter(Boolean).join("·") : "");
 }
 
 function render() {
@@ -1877,9 +1946,9 @@ function showRules(full) {
   <p><b style="color:var(--signal)">목표</b> · 세계 영토 가치의 절반을 차지하면 승리. 내 땅을 모두 잃으면 패배.</p>
   <p>${rt ? "" : `1. <b>증원</b> · 받은 병력을 내 땅에 눌러 배치하거나 '자동 배치'를 누릅니다.<br>`}${rt ? 1 : 2}. <b>내 땅을 누르면</b> 갈 수 있는 곳에 화살표가 뜹니다. 빨강은 공격, 초록은 이동.<br>${rt ? 2 : 3}. <b>화살표 끝 지역을 누르면</b> 출격합니다. 보낼 병력은 위쪽 25~100%(키보드 1~4).<br>${rt ? `3. <b>시간은 저절로</b> 흐르고 증원도 매일 들어옵니다. 급할 땐 일시정지.` : `4. <b>턴 종료</b>를 누르면 컴퓨터가 움직이고 다음 계절이 됩니다.`}</p>
   <p>적 위에 마우스를 올리면 예상 승률이 보입니다. 나머지는 하면서 익히면 됩니다.</p>
-  <div class="btnrow"><button type="button" class="primary" id="closeRules">시작하기</button><button type="button" id="fullRules">규칙 자세히</button></div>`;
+  <div class="btnrow"><button type="button" class="primary" id="closeRules">${S.phase === "scenario" ? "시나리오 고르기" : "시작하기"}</button><button type="button" id="fullRules">규칙 자세히</button></div>`;
     document.getElementById("overlay").hidden = false;
-    document.getElementById("closeRules").onclick = hideOverlay;
+    document.getElementById("closeRules").onclick = closeRulesBox;
     document.getElementById("fullRules").onclick = () => showRules(true);
     document.getElementById("closeRules").focus({ preventScroll: true });   // focusing must not scroll a phone page away from the map
     bindBackdrop();
@@ -1905,13 +1974,13 @@ function showRules(full) {
   <p><b style="color:var(--signal)">바다</b> · 점선은 해상 항로입니다. 바다 건너 나라도 항로로 연결되면 공격할 수 있습니다.</p>
   <button type="button" class="primary" id="closeRules">알겠습니다</button>`;
   document.getElementById("overlay").hidden = false;
-  document.getElementById("closeRules").onclick = hideOverlay;
+  document.getElementById("closeRules").onclick = closeRulesBox;
   box.scrollTop = 0;
   bindBackdrop();
 }
 // a click on the dark backdrop closes the rules too (only the rules: other overlays need a choice)
 function bindBackdrop() {
-  document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) hideOverlay(); };
+  document.getElementById("overlay").onclick = e => { if (e.target.id === "overlay" && document.getElementById("closeRules")) closeRulesBox(); };
 }
 // ---- battle effects: arrows, explosions, flags planted, troop columns; all positioned on the globe every frame ----
 const RM = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
@@ -2213,7 +2282,9 @@ sndPaint();
 // a small card that sits on the map next to the selected region
 function renderPop() {
   const el = document.getElementById("pop"), i = ui.sel;
-  if (i < 0 || !S || ["scenario", "lobby", "over"].includes(S.phase) || !knownT(i)) { el.hidden = true; return; }
+  if (i < 0 || !S || ["scenario", "lobby", "over"].includes(S.phase) || !knownT(i)) { el.hidden = true; popFor = -1; return; }
+  // a sideways phone shows the same card in the panel beside the map; here it would only cover the map
+  if (SIDEWAYS.matches) { el.hidden = true; if (TOUCH && i !== popFor) { popFor = i; zoomToTargets(i); } return; }
   const o = owner(i), live = S.phase === "deploy" || S.phase === "ops";
   let body = `<div class="row"><span>${o < 0 ? neutralFlag(18) : flagHTML(fac(o), 18)}${ownerName(o)}</span><b>${seenT(i) ? S.troops[i] + unit() : "?"}</b></div>`;
   if (seenT(i) && S.res) body += `<div class="row"><span>특산</span><b>${resName(T[i].spec)}</b></div>`;
@@ -2229,10 +2300,34 @@ function renderPop() {
   const st = el.querySelector("[data-popstart]"); if (st) st.onclick = () => startAs(i);
   el.querySelector("[data-popclose]").onclick = () => { ui.sel = -1; render(); };
   placePop();
+  if (PHONE.matches && ui.sel !== popFor) {
+    // a newly picked region hidden under the docked card (or off the visible globe) is turned to the middle
+    popFor = ui.sel;
+    const [px, py] = gproj(T[i].geoC), wr = wrap.getBoundingClientRect(), svgR = svg.node().getBoundingClientRect();
+    const sc = Math.min(svgR.width / VB.w, svgR.height / VB.h), y = svgR.top + (svgR.height - VB.h * sc) / 2 + (py - VB.y) * sc;
+    if (zoomToTargets(i)) return;
+    if (!facing(i) || y > el.getBoundingClientRect().top - 24 || y < wr.top + 70) turnTo(i);
+  }
 }
+let popFor = -1;
+// my own region on a touch screen: zoom in until its neighbours sit a fingertip apart, so the target can be tapped
+function zoomToTargets(i) {
+  if (!isPlayer(i) || !(S.phase === "deploy" || S.phase === "ops")) return false;
+  const svgR = svg.node().getBoundingClientRect(), sc = Math.min(svgR.width / VB.w, svgR.height / VB.h);
+  const pts = [...NB(i)].map(j => gproj(T[j].geoC));
+  let dmin = Infinity;
+  for (let a = 0; a < pts.length; a++) for (let b = a + 1; b < pts.length; b++) dmin = Math.min(dmin, Math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]) * sc);
+  if (pts.length < 2 || dmin >= 44) return false;
+  svg.call(zoom.scaleTo, Math.min(6, K * 44 / Math.max(dmin, 6))); turnTo(i);
+  return true;
+}
+const PHONE = window.matchMedia ? matchMedia("(max-width: 560px)") : { matches: false };
+const SIDEWAYS = window.matchMedia ? matchMedia("(orientation: landscape) and (max-height: 500px) and (min-width: 561px)") : { matches: false };
 function placePop() {
   const el = document.getElementById("pop");
   if (el.hidden || ui.sel < 0) return;
+  el.classList.toggle("dock", PHONE.matches);
+  if (PHONE.matches) { el.style.visibility = ""; return; }
   if (!facing(ui.sel)) { el.style.visibility = "hidden"; return; }
   el.style.visibility = "";
   const svgR = svg.node().getBoundingClientRect(), wr = wrap.getBoundingClientRect();
@@ -2434,6 +2529,8 @@ function showEnd(win, why) {
   document.getElementById("againBtn").onclick = newGame;
 }
 function hideOverlay() { document.getElementById("overlay").hidden = true; }
+// closing the rules before a game has begun goes back to the scenario list, not to an empty map
+function closeRulesBox() { hideOverlay(); if (S && S.phase === "scenario") showScenarios(); }
 
 document.getElementById("endBtn").onclick = endTurn;
 document.getElementById("goBtn").onclick = () => { if (S.phase === "pick" && ui.sel >= 0) startAs(ui.sel); };
@@ -2452,7 +2549,7 @@ document.querySelectorAll("#pctSeg button").forEach(b => b.onclick = () => setPc
 document.addEventListener("keydown", e => {
   if (e.key === "Escape") {
     // Esc closes the rules sheet first; with nothing open it clears the selection
-    if (!document.getElementById("overlay").hidden) { if (document.getElementById("closeRules")) hideOverlay(); return; }
+    if (!document.getElementById("overlay").hidden) { if (document.getElementById("closeRules")) closeRulesBox(); return; }
     ui.sel = -1; render(); return;
   }
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) || e.ctrlKey || e.altKey || e.metaKey) return;
