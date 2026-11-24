@@ -35,6 +35,11 @@ jobs:
           npx cap add android
           npx cap sync android
 
+      - name: 앱 아이콘·시작 화면 (assets/의 원본 그림에서 모든 해상도 생성)
+        run: |
+          npx --yes @capacitor/assets@3.0.5 generate --android --iconBackgroundColor '#232819' --splashBackgroundColor '#12160f' --splashBackgroundColorDark '#12160f'
+          ls android/app/src/main/res/mipmap-xxxhdpi
+
       - name: 버전 번호 (빌드마다 1씩 증가)
         working-directory: android/app
         run: |
