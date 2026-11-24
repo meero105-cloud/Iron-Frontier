@@ -63,7 +63,8 @@ body {
 .chip { font-family: var(--font-display); font-size: 12.5px; letter-spacing: .06em; padding: 4px 10px; border-radius: 2px; border: 1px solid rgba(0,0,0,.5); color: #cfc8ad; background: rgba(0,0,0,.25); white-space: nowrap; }
 .chip.live { color: #1b1606; background: linear-gradient(#f2c95a, #d9a531); border-color: #6e4f12; box-shadow: 0 0 0 1px rgba(255,220,130,.25), 0 0 14px rgba(233,185,73,.35); }
 .spacer { flex: 1; }
-.controls { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.controls, .menu { display: flex; flex-wrap: wrap; gap: 7px; align-items: center; }
+.menu .ph { display: none; }
 button {
   font: inherit; font-size: 13px; color: #efe8cf;
   background: linear-gradient(180deg, #535a3c 0%, #3b4129 100%);
@@ -356,10 +357,40 @@ svg.moving .terr { transition: none; }
   .stat b { font-size: 13px; }
   .chip { font-size: 11.5px; padding: 3px 8px; }
   .spacer { display: none; }
-  .controls { gap: 5px; }
-  .controls button, .seg button { padding: 6px 8px; font-size: 12px; }
-  #sndBtn { min-width: 32px; padding: 6px 7px; }
-  .mapwrap { height: 58vh; }
+  .menu { gap: 5px; margin-left: auto; flex-wrap: nowrap; }
+  .menu button { padding: 6px 8px; font-size: 12px; }
+  .menu .dk { display: none; }
+  .menu .ph { display: inline; font-weight: 700; }
+  #sndBtn, #rulesBtn { min-width: 32px; padding: 6px 7px; }
+  /* status stays on one row at the top; the commands sit at the bottom where the thumb is */
+  .bar { position: sticky; top: 0; flex-wrap: nowrap; }
+  .app { --cmdH: 0px; }
+  .app:has(.controls > :not([hidden])) { --cmdH: calc(62px + env(safe-area-inset-bottom, 0px)); }
+  /* deploying (or real time) needs a second row: placing on top, sending below */
+  .app:has(#stepSeg:not([hidden])), .app:has(#speedSeg:not([hidden])) { --cmdH: calc(114px + env(safe-area-inset-bottom, 0px)); }
+  .controls { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; gap: 6px; flex-wrap: wrap; justify-content: center;
+    padding: 8px max(12px, env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+    background: var(--grain), linear-gradient(0deg, #2a2f1e 0%, #333924 45%, #434a2e 100%);
+    border-top: 2px solid #0e100a; box-shadow: 0 -3px 10px rgba(0,0,0,.55); }
+  .controls:not(:has(> :not([hidden]))) { display: none; }
+  .controls > .seg { flex: 1 1 55%; min-width: 0; }
+  .controls > button { white-space: nowrap; }
+  #autoBtn, #pauseBtn { flex: 1 1 30%; }
+  .controls .seg button { flex: 1; }
+  .controls button { min-height: 44px; padding: 8px 10px; font-size: 14px; }
+  .controls { row-gap: 8px; }
+  .controls .seg button { padding: 8px 4px; }
+  #endBtn { flex: none; padding-inline: 16px; }
+  #goBtn { flex: 1; }
+  /* the globe takes what is left, with the resource strip peeking out below as a hint to scroll for the panels */
+  .mapwrap { height: calc(100vh - 46px - var(--cmdH) - 64px); height: calc(100dvh - 46px - var(--cmdH) - 64px); min-height: 300px; }
+  .side { padding-bottom: calc(var(--cmdH) + 12px); }
+  .bar .stat b, .menu button, .chip { white-space: nowrap; }
+}
+/* small phones: the emblem gives its room to the date and the menu */
+@media (max-width: 380px) {
+  .bar .brand { display: none; }
+  .bar { gap: 6px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .terr { transition: none; }
@@ -396,8 +427,11 @@ svg.moving .terr { transition: none; }
       </div>
       <button type="button" id="pauseBtn" hidden>❚❚ 일시정지</button>
       <button type="button" id="endBtn" class="primary" hidden>턴 종료</button>
+      <button type="button" id="goBtn" class="primary" hidden>작전 개시</button>
+    </div>
+    <div class="menu">
       <button type="button" id="sndBtn" aria-label="효과음 켜기/끄기" title="효과음">🔊</button>
-      <button type="button" id="rulesBtn">게임 방법</button>
+      <button type="button" id="rulesBtn" aria-label="게임 방법"><span class="dk">게임 방법</span><span class="ph" aria-hidden="true">?</span></button>
       <button type="button" id="newBtn">새 게임</button>
     </div>
   </header>
@@ -1634,8 +1668,9 @@ lbl.append("text").attr("class", "occ").attr("y", -19);
 const marchG = root.append("g").attr("class", "marches").attr("pointer-events", "none");
 const fxG = root.append("g").attr("class", "fx");
 // compass rose on the map table
+let roseG;
 (function rose() {
-  const g = svg.append("g").attr("transform", `translate(${W - 44},${H - 46})`).attr("opacity", .72).attr("pointer-events", "none");
+  const g = roseG = svg.append("g").attr("transform", `translate(${W - 44},${H - 46})`).attr("opacity", .72).attr("pointer-events", "none");
   g.append("circle").attr("r", 25).attr("fill", "rgba(15,18,12,.55)").attr("stroke", "#c9a24a").attr("stroke-width", .8);
   g.append("circle").attr("r", 20).attr("fill", "none").attr("stroke", "#c9a24a").attr("stroke-width", .5).attr("stroke-dasharray", "1 2.2");
   g.append("path").attr("d", "M0,-30L5,-5L30,0L5,5L0,30L-5,5L-30,0L-5,-5Z").attr("fill", "#2a2e1e").attr("stroke", "#c9a24a").attr("stroke-width", .8);
@@ -1705,6 +1740,21 @@ function redraw() {
   drawMarches();
 }
 const center = () => gproj.invert([W / 2, H / 2]);
+// the map box follows the screen: on a tall phone the 960x470 table is cropped around the globe so it fills the width
+let VB = { x: 0, y: 0, w: W, h: H };
+function fitView() {
+  const r = svg.node().getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const a = r.width / r.height;
+  // landscape screens keep the whole table as before; portrait ones narrow it smoothly down to the globe's width
+  const w = Math.min(W, Math.max(500, W * a)), h = w / a;
+  VB = a >= W / H ? { x: 0, y: 0, w: W, h: H } : { x: (W - w) / 2, y: (H - h) / 2, w, h };
+  svg.attr("viewBox", `${VB.x} ${VB.y} ${VB.w} ${VB.h}`);
+  roseG.attr("transform", `translate(${VB.x + VB.w - 44},${VB.y + VB.h - 46})`);
+  placePop();
+}
+if (window.ResizeObserver) new ResizeObserver(fitView).observe(document.getElementById("mapwrap")); else addEventListener("resize", fitView);
+fitView();
 const facing = i => d3.geoDistance(T[i].geoC, center()) < 1.45;
 function placeLabels() {
   if (!S) return;
@@ -1790,6 +1840,10 @@ function render() {
   const rtOn = S.mode === "rt" && S.phase === "ops" && S.net !== "guest";
   document.getElementById("endBtn").hidden = !(S.phase === "deploy" || S.phase === "ops") || S.mode === "rt";
   document.getElementById("pauseBtn").hidden = !rtOn;
+  // the start button also sits with the commands, so on a phone it is not buried below the map
+  const goOn = S.phase === "pick" && !S.net && ui.sel >= 0 && knownT(ui.sel);
+  document.getElementById("goBtn").hidden = !goOn;
+  if (goOn) document.getElementById("goBtn").textContent = `${C[T[ui.sel].c].ko}(으)로 작전 개시`;
   document.getElementById("pauseBtn").textContent = S.paused ? "▶ 재개" : "❚❚ 일시정지";
   document.getElementById("speedSeg").hidden = !rtOn;
   document.querySelectorAll("#speedSeg button").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.speed === S.speed)));
@@ -1804,7 +1858,7 @@ function guideText() {
   if (S.phase === "scenario") return "시나리오를 골라 전쟁을 시작하세요";
   if (S.phase === "lobby") return "대기실 · 세력을 고르고 시작을 기다리세요";
   if (S.net === "guest" && S.player < 0) return "관전 중 · 이번 판에는 세력이 배정되지 않았습니다";
-  if (S.phase === "pick") return s < 0 ? "① 지휘할 국가를 지도에서 클릭하세요" : "② 오른쪽의 '작전 개시' 버튼을 누르세요";
+  if (S.phase === "pick") return s < 0 ? "① 지휘할 국가를 지도에서 클릭하세요" : "② '작전 개시' 버튼을 누르세요";
   if (S.mode === "rt" && S.phase === "ops") {
     if (S.paused) return "일시정지 중 · 재개를 누르면 시간이 다시 흐릅니다";
     if (s >= 0 && isPlayer(s)) return "실시간 · 증원이 이 지역에 모입니다. 빨간 화살표 = 진격 · 초록 화살표 = 이동 · 회색 = 공격 불가 (거리만큼 며칠 걸림)";
@@ -1827,7 +1881,7 @@ function showRules(full) {
     document.getElementById("overlay").hidden = false;
     document.getElementById("closeRules").onclick = hideOverlay;
     document.getElementById("fullRules").onclick = () => showRules(true);
-    document.getElementById("closeRules").focus();
+    document.getElementById("closeRules").focus({ preventScroll: true });   // focusing must not scroll a phone page away from the map
     bindBackdrop();
     return;
   }
@@ -2182,9 +2236,9 @@ function placePop() {
   if (!facing(ui.sel)) { el.style.visibility = "hidden"; return; }
   el.style.visibility = "";
   const svgR = svg.node().getBoundingClientRect(), wr = wrap.getBoundingClientRect();
-  const sc = Math.min(svgR.width / W, svgR.height / H), ox = (svgR.width - W * sc) / 2, oy = (svgR.height - H * sc) / 2;
+  const sc = Math.min(svgR.width / VB.w, svgR.height / VB.h), ox = (svgR.width - VB.w * sc) / 2, oy = (svgR.height - VB.h * sc) / 2;
   const [px, py] = gproj(T[ui.sel].geoC);
-  let x = svgR.left - wr.left + ox + px * sc + 16, y = svgR.top - wr.top + oy + py * sc - 20;
+  let x = svgR.left - wr.left + ox + (px - VB.x) * sc + 16, y = svgR.top - wr.top + oy + (py - VB.y) * sc - 20;
   const w = el.offsetWidth, h = el.offsetHeight;
   if (x + w > wr.width - 8) x = x - w - 32;
   x = Math.max(8, x); y = Math.max(52, Math.min(y, wr.height - h - 8));
@@ -2382,6 +2436,7 @@ function showEnd(win, why) {
 function hideOverlay() { document.getElementById("overlay").hidden = true; }
 
 document.getElementById("endBtn").onclick = endTurn;
+document.getElementById("goBtn").onclick = () => { if (S.phase === "pick" && ui.sel >= 0) startAs(ui.sel); };
 document.getElementById("pauseBtn").onclick = () => { S.paused = !S.paused; toast(S.paused ? "일시정지" : "재개"); render(); persist(); };
 document.querySelectorAll("#speedSeg button").forEach(b => b.onclick = () => { S.speed = b.dataset.speed; startClock(); render(); persist(); });
 document.getElementById("autoBtn").onclick = () => { autoDeploy(); S.phase = "ops"; toast("전선 위주로 자동 배치했습니다."); render(); persist(); };
